@@ -20,7 +20,7 @@ class LoginScreen extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 20),
               child: Image.asset(
                 'assets/infocontrol_logo.png',
-                width: 100,
+                width: 165,
               ),
             ),
             Container(
