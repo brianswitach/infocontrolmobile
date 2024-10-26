@@ -16,7 +16,6 @@ class LoginScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Logo Infocontrol
             Padding(
               padding: const EdgeInsets.only(bottom: 20),
               child: Image.asset(
@@ -24,12 +23,11 @@ class LoginScreen extends StatelessWidget {
                 width: 100,
               ),
             ),
-            // Cuadro de inicio de sesión
             Container(
               width: MediaQuery.of(context).size.width * 0.85,
               padding: EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white, // Fondo blanco para el cuadro de inicio de sesión
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Column(
@@ -40,8 +38,8 @@ class LoginScreen extends StatelessWidget {
                     style: TextStyle(
                       fontFamily: 'Montserrat',
                       fontSize: 24,
-                      fontWeight: FontWeight.w600, // SemiBold 600
-                      color: Colors.black, 
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black,
                     ),
                   ),
                   SizedBox(height: 8),
@@ -54,7 +52,6 @@ class LoginScreen extends StatelessWidget {
                     ),
                   ),
                   SizedBox(height: 16),
-                  // Campo de usuario
                   TextField(
                     decoration: InputDecoration(
                       filled: true,
@@ -69,7 +66,6 @@ class LoginScreen extends StatelessWidget {
                     ),
                   ),
                   SizedBox(height: 16),
-                  // Campo de contraseña
                   TextField(
                     decoration: InputDecoration(
                       filled: true,
@@ -85,45 +81,68 @@ class LoginScreen extends StatelessWidget {
                     obscureText: true,
                   ),
                   SizedBox(height: 16),
-                  // Recordar datos y enlace de recuperación
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      bool isSmallScreen = constraints.maxWidth < 350;
+
+                      return Column(
                         children: [
-                          Container(
-                            height: 20,
-                            width: 20,
-                            decoration: BoxDecoration(
-                              color: Colors.grey[200],
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.black54, width: 1),
-                            ),
-                            child: Checkbox(
-                              value: false,
-                              onChanged: (value) {},
-                              activeColor: Colors.grey,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                            ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    height: 20,
+                                    width: 20,
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[200],
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.black54, width: 1),
+                                    ),
+                                    child: Checkbox(
+                                      value: false,
+                                      onChanged: (value) {},
+                                      activeColor: Colors.grey,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text("Recordar datos", style: TextStyle(fontFamily: 'Montserrat', color: Colors.black54)),
+                                ],
+                              ),
+                              if (!isSmallScreen)
+                                TextButton(
+                                  onPressed: () {},
+                                  child: Text(
+                                    "¿Olvidaste tu contraseña?",
+                                    style: TextStyle(
+                                      fontFamily: 'Montserrat',
+                                      color: Colors.blue,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                          SizedBox(width: 8),
-                          Text("Recordar datos", style: TextStyle(fontFamily: 'Montserrat', color: Colors.black54)),
+                          if (isSmallScreen)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed: () {},
+                                child: Text(
+                                  "¿Olvidaste tu contraseña?",
+                                  style: TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    color: Colors.blue,
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
-                      ),
-                      TextButton(
-                        onPressed: () {},
-                        child: Text(
-                          "¿Olvidaste tu contraseña?",
-                          style: TextStyle(
-                            fontFamily: 'Montserrat',
-                            color: Colors.blue,
-                          ),
-                        ),
-                      ),
-                    ],
+                      );
+                    },
                   ),
                   SizedBox(height: 16),
-                  // Botón de inicio de sesión
                   ElevatedButton(
                     onPressed: () {},
                     style: ElevatedButton.styleFrom(
@@ -146,7 +165,6 @@ class LoginScreen extends StatelessWidget {
               ),
             ),
             SizedBox(height: 20),
-            // Cuadro promocional
             Container(
               width: MediaQuery.of(context).size.width * 0.85,
               padding: EdgeInsets.all(20),
