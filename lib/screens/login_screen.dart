@@ -40,7 +40,8 @@ class LoginScreen extends StatelessWidget {
                     style: TextStyle(
                       fontFamily: 'Montserrat',
                       fontSize: 24,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w600, // SemiBold 600
+                      color: Colors.black, 
                     ),
                   ),
                   SizedBox(height: 8),
