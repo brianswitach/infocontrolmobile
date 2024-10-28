@@ -173,8 +173,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     obscureText: true,
                   ),
                   SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
@@ -197,13 +197,17 @@ class _LoginScreenState extends State<LoginScreen> {
                           Text(getText('rememberData'), style: TextStyle(fontFamily: 'Montserrat', color: Colors.black54)),
                         ],
                       ),
-                      TextButton(
-                        onPressed: () {},
-                        child: Text(
-                          getText('forgotPassword'),
-                          style: TextStyle(
-                            fontFamily: 'Montserrat',
-                            color: Colors.blue,
+                      SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: () {},
+                          child: Text(
+                            getText('forgotPassword'),
+                            style: TextStyle(
+                              fontFamily: 'Montserrat',
+                              color: Colors.blue,
+                            ),
                           ),
                         ),
                       ),
