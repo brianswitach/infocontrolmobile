@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -66,6 +67,15 @@ class _LoginScreenState extends State<LoginScreen> {
     'promoSubtitle': 'Controle integral, resultados excelentes.',
     'learnMore': 'Saiba mais',
   };
+
+  // Función para abrir el enlace en el navegador
+  Future<void> _launchURL() async {
+  final Uri url = Uri.parse('https://www.infocontrolweb.com/inteligencia_artificial');
+  if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+    print('Error al abrir el enlace $url');
+  }
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -173,6 +183,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     obscureText: true,
                   ),
                   SizedBox(height: 16),
+                  // Recordar datos y olvidaste tu contraseña
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -197,7 +208,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           Text(getText('rememberData'), style: TextStyle(fontFamily: 'Montserrat', color: Colors.black54)),
                         ],
                       ),
-                      SizedBox(height: 8),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: TextButton(
@@ -236,6 +246,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
             SizedBox(height: 20),
+            // Cuadro promocional
             Container(
               width: MediaQuery.of(context).size.width * 0.85,
               padding: EdgeInsets.all(20),
@@ -263,7 +274,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: () {},
+                    onPressed: _launchURL,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
