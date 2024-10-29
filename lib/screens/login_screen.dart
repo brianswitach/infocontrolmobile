@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'home_screen.dart'; // Asegúrate de que la ruta de importación sea correcta
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -70,12 +71,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // Función para abrir el enlace en el navegador
   Future<void> _launchURL() async {
-  final Uri url = Uri.parse('https://www.infocontrolweb.com/inteligencia_artificial');
-  if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-    print('Error al abrir el enlace $url');
+    final Uri url = Uri.parse('https://www.infocontrolweb.com/inteligencia_artificial');
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      print('Error al abrir el enlace $url');
+    }
   }
-}
-
 
   @override
   Widget build(BuildContext context) {
@@ -225,7 +225,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: () {},
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => HomeScreen()),
+                      );
+                    },
                     style: ElevatedButton.styleFrom(
                       padding: EdgeInsets.symmetric(horizontal: 40, vertical: 12),
                       backgroundColor: Colors.blue,
