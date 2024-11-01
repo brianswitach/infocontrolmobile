@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'lupa_empresa.dart'; // Asegúrate de importar la pantalla "lupa_empresa.dart"
 
 class EmpresaScreen extends StatefulWidget {
   @override
@@ -9,17 +10,48 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        iconTheme: IconThemeData(color: Colors.black),
-        title: Text(
-          'Detalles de la Empresa',
-          style: TextStyle(
-            color: Colors.black,
-            fontFamily: 'Montserrat',
-          ),
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(60),
+        child: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          iconTheme: IconThemeData(color: Colors.black),
+          actions: [
+            IconButton(
+              icon: Icon(Icons.search, color: Color(0xFF2a3666)),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => LupaEmpresaScreen()),
+                );
+              },
+            ),
+            Container(
+              height: 24,
+              width: 1,
+              color: Colors.grey[300],
+              margin: EdgeInsets.symmetric(horizontal: 10),
+            ),
+            CircleAvatar(
+              backgroundColor: Color(0xFF232e63),
+              radius: 15,
+              child: Text(
+                'B', // Logo temporal
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+            SizedBox(width: 5),
+            Icon(
+              Icons.arrow_drop_down,
+              color: Color(0xFF232e63),
+            ),
+            SizedBox(width: 10),
+          ],
         ),
-        elevation: 0,
       ),
       drawer: Drawer(
         child: Container(
@@ -92,18 +124,178 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                 ),
               ),
               SizedBox(height: 30),
-              // Opciones debajo de "Cambiar Empresa" eliminadas
             ],
           ),
         ),
       ),
-      body: Center(
-        child: Text(
-          'Pantalla de detalles para BANCOR S.A.',
-          style: TextStyle(
-            fontFamily: 'Montserrat',
-            fontSize: 20,
-            color: Colors.black,
+      body: SingleChildScrollView(
+        child: Container(
+          color: Color(0xFFF2F4FF),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              GestureDetector(
+                onTap: () {
+                  Navigator.pop(context); // Vuelve a la pantalla anterior
+                },
+                child: Row(
+                  children: [
+                    Icon(Icons.arrow_back, color: Color(0xFF9dbdfd)),
+                    SizedBox(width: 8),
+                    Text(
+                      'Seleccionar contratista para su información',
+                      style: TextStyle(
+                        color: Color(0xFF9dbdfd),
+                        fontFamily: 'Montserrat',
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 20),
+              Row(
+                children: [
+                  Text(
+                    'BANCOR S.A.',
+                    style: TextStyle(
+                      fontFamily: 'Montserrat',
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF232e5f),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Image.asset(
+                    'assets/integral_icon.png',
+                    width: 100, // Tamaño ajustado del ícono
+                  ),
+                ],
+              ),
+              SizedBox(height: 30),
+              Text(
+                'Buscar:',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                ),
+              ),
+              SizedBox(height: 10),
+              TextField(
+                decoration: InputDecoration(
+                  hintText: 'Buscar por nombre de contratista',
+                  hintStyle: TextStyle(
+                    fontFamily: 'Montserrat',
+                    color: Colors.grey,
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              SizedBox(height: 20),
+              Text(
+                'País:',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                ),
+              ),
+              SizedBox(height: 10),
+              TextField(
+                decoration: InputDecoration(
+                  hintText: 'Seleccione una opción',
+                  hintStyle: TextStyle(
+                    fontFamily: 'Montserrat',
+                    color: Colors.grey,
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              SizedBox(height: 20),
+              Text(
+                'Tipo de contratista:',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                ),
+              ),
+              SizedBox(height: 10),
+              TextField(
+                decoration: InputDecoration(
+                  hintText: 'Seleccione una opción',
+                  hintStyle: TextStyle(
+                    fontFamily: 'Montserrat',
+                    color: Colors.grey,
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              SizedBox(height: 20),
+              Text(
+                'Categoría contratista:',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                ),
+              ),
+              SizedBox(height: 10),
+              TextField(
+                decoration: InputDecoration(
+                  hintText: 'Seleccione una opción o varias opciones',
+                  hintStyle: TextStyle(
+                    fontFamily: 'Montserrat',
+                    color: Colors.grey,
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              SizedBox(height: 30),
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: () {},
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Color(0xFF4080ff),
+                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: Icon(Icons.download, color: Colors.white),
+                  label: Text(
+                    'Generar excel',
+                    style: TextStyle(
+                      fontFamily: 'Montserrat',
+                      fontSize: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
