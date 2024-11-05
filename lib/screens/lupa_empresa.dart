@@ -8,6 +8,7 @@ class LupaEmpresaScreen extends StatefulWidget {
 class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractor;
   bool showContractorInfo = false;
+  bool showEmployees = false;
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +151,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                         });
                       },
                       decoration: InputDecoration(
-                        contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                        contentPadding:
+                            EdgeInsets.symmetric(vertical: 10, horizontal: 15),
                         hintText: 'Seleccione Contratista',
                         hintStyle: TextStyle(
                           fontFamily: 'Montserrat',
@@ -318,22 +320,30 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             SizedBox(height: 8),
                             Text('CUIT: 30709035262'),
                             Text('Tipo persona: Persona Jurídica'),
-                            Text('Tipo trabajador: Empleados en Relación de Dependencia'),
+                            Text(
+                                'Tipo trabajador: Empleados en Relación de Dependencia'),
                             Text('Actividades: -'),
                             SizedBox(height: 20),
                             Row(
                               children: [
                                 Expanded(
                                   child: ElevatedButton.icon(
-                                    onPressed: () {},
+                                    onPressed: () {
+                                      setState(() {
+                                        showEmployees = !showEmployees;
+                                      });
+                                    },
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.grey[200],
-                                      padding: EdgeInsets.symmetric(vertical: 12),
+                                      padding:
+                                          EdgeInsets.symmetric(vertical: 12),
                                     ),
-                                    icon: Icon(Icons.people, color: Colors.black54),
+                                    icon: Icon(Icons.people,
+                                        color: Colors.black54),
                                     label: Text(
                                       'Empleados',
-                                      style: TextStyle(color: Colors.black54),
+                                      style:
+                                          TextStyle(color: Colors.black54),
                                     ),
                                   ),
                                 ),
@@ -343,24 +353,98 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                     onPressed: () {},
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.grey[200],
-                                      padding: EdgeInsets.symmetric(vertical: 12),
+                                      padding:
+                                          EdgeInsets.symmetric(vertical: 12),
                                     ),
-                                    icon: Icon(Icons.directions_car, color: Colors.black54),
+                                    icon: Icon(Icons.directions_car,
+                                        color: Colors.black54),
                                     label: Text(
                                       'Vehículos',
-                                      style: TextStyle(color: Colors.black54),
+                                      style:
+                                          TextStyle(color: Colors.black54),
                                     ),
                                   ),
                                 ),
                               ],
                             ),
+                            if (showEmployees) ...[
+                              SizedBox(height: 20),
+                              Text(
+                                'Empleados',
+                                style: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  fontSize: 18,
+                                  color: Color(0xFF7e8e95),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 10),
+                              // Empleado habilitado
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '33306456 - ACOSTA MAURO ALEXIS',
+                                      style: TextStyle(color: Colors.green),
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    onPressed: () {},
+                                    icon: Icon(Icons.arrow_forward,
+                                        color: Colors.white, size: 16),
+                                    label: Text(
+                                      'Entra',
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 12),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Color(0xFF43b6ed),
+                                      padding: EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      minimumSize: Size(60, 30),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 8),
+                              // Empleado inhabilitado con rojo fuerte
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '30844180 - BRAVO NICOLÁS ALEJANDRO',
+                                      style: TextStyle(color: Colors.red[800]),
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    onPressed: () {},
+                                    icon: Icon(Icons.arrow_forward,
+                                        color: Colors.white, size: 16),
+                                    label: Text(
+                                      'Entra',
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 12),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Color(0xFF43b6ed),
+                                      padding: EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      minimumSize: Size(60, 30),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                             SizedBox(height: 20),
                             Center(
                               child: ElevatedButton.icon(
                                 onPressed: () {},
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.grey[300],
-                                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 24, vertical: 12),
                                 ),
                                 icon: Icon(Icons.print, color: Colors.black54),
                                 label: Text(
