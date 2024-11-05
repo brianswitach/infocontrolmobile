@@ -160,13 +160,14 @@ class LupaEmpresaScreen extends StatelessWidget {
                       ],
                       onChanged: (value) {},
                       decoration: InputDecoration(
+                        contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15), // Margen izquierdo de 15 px
                         hintText: 'Seleccione Contratista',
                         hintStyle: TextStyle(
                           fontFamily: 'Montserrat',
                           color: Colors.grey,
                         ),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: Colors.grey[200], // Fondo gris claro
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide.none,
@@ -203,7 +204,7 @@ class LupaEmpresaScreen extends StatelessWidget {
                                 color: Colors.grey,
                               ),
                               filled: true,
-                              fillColor: Colors.white,
+                              fillColor: Colors.grey[200], // Fondo gris claro
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide.none,
@@ -212,9 +213,15 @@ class LupaEmpresaScreen extends StatelessWidget {
                           ),
                         ),
                         SizedBox(width: 8),
-                        IconButton(
-                          icon: Icon(Icons.search, color: Colors.grey),
-                          onPressed: () {},
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Color(0xFF43b6ed), // Fondo del botón de la lupa
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: IconButton(
+                            icon: Icon(Icons.search, color: Colors.white), // Icono blanco
+                            onPressed: () {},
+                          ),
                         ),
                       ],
                     ),
@@ -248,7 +255,7 @@ class LupaEmpresaScreen extends StatelessWidget {
                                 color: Colors.grey,
                               ),
                               filled: true,
-                              fillColor: Colors.white,
+                              fillColor: Colors.grey[200], // Fondo gris claro
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide.none,
@@ -257,9 +264,15 @@ class LupaEmpresaScreen extends StatelessWidget {
                           ),
                         ),
                         SizedBox(width: 8),
-                        IconButton(
-                          icon: Icon(Icons.search, color: Colors.grey),
-                          onPressed: () {},
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Color(0xFF43b6ed), // Fondo del botón de la lupa
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: IconButton(
+                            icon: Icon(Icons.search, color: Colors.white), // Icono blanco
+                            onPressed: () {},
+                          ),
                         ),
                       ],
                     ),
