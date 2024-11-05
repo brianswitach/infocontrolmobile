@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 
-class LupaEmpresaScreen extends StatelessWidget {
+class LupaEmpresaScreen extends StatefulWidget {
+  @override
+  _LupaEmpresaScreenState createState() => _LupaEmpresaScreenState();
+}
+
+class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
+  String? selectedContractor;
+  bool showContractorInfo = false;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -118,29 +126,6 @@ class LupaEmpresaScreen extends StatelessWidget {
                     ),
                     SizedBox(height: 8),
                     Divider(color: Colors.grey[300], thickness: 1),
-                    SizedBox(height: 8),
-                    // Botón Generar QR
-                    Center(
-                      child: ElevatedButton.icon(
-                        onPressed: () {},
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Color(0xFF24bcd4),
-                          padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        icon: Icon(Icons.qr_code, color: Colors.white),
-                        label: Text(
-                          'Generar QR',
-                          style: TextStyle(
-                            fontFamily: 'Montserrat',
-                            fontSize: 16,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
                     SizedBox(height: 20),
                     Text(
                       'Contratista',
@@ -153,21 +138,26 @@ class LupaEmpresaScreen extends StatelessWidget {
                     SizedBox(height: 10),
                     DropdownButtonFormField<String>(
                       items: [
-                        DropdownMenuItem(child: Text("1"), value: "1"),
-                        DropdownMenuItem(child: Text("2"), value: "2"),
-                        DropdownMenuItem(child: Text("3"), value: "3"),
-                        DropdownMenuItem(child: Text("4"), value: "4"),
+                        DropdownMenuItem(
+                          child: Text("ABC CONSULTING"),
+                          value: "ABC CONSULTING",
+                        ),
                       ],
-                      onChanged: (value) {},
+                      onChanged: (value) {
+                        setState(() {
+                          selectedContractor = value;
+                          showContractorInfo = true;
+                        });
+                      },
                       decoration: InputDecoration(
-                        contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15), // Margen izquierdo de 15 px
+                        contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
                         hintText: 'Seleccione Contratista',
                         hintStyle: TextStyle(
                           fontFamily: 'Montserrat',
                           color: Colors.grey,
                         ),
                         filled: true,
-                        fillColor: Colors.grey[200], // Fondo gris claro
+                        fillColor: Colors.grey[200],
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide.none,
@@ -204,7 +194,7 @@ class LupaEmpresaScreen extends StatelessWidget {
                                 color: Colors.grey,
                               ),
                               filled: true,
-                              fillColor: Colors.grey[200], // Fondo gris claro
+                              fillColor: Colors.grey[200],
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide.none,
@@ -215,11 +205,11 @@ class LupaEmpresaScreen extends StatelessWidget {
                         SizedBox(width: 8),
                         Container(
                           decoration: BoxDecoration(
-                            color: Color(0xFF43b6ed), // Fondo del botón de la lupa
+                            color: Color(0xFF43b6ed),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: IconButton(
-                            icon: Icon(Icons.search, color: Colors.white), // Icono blanco
+                            icon: Icon(Icons.search, color: Colors.white),
                             onPressed: () {},
                           ),
                         ),
@@ -227,7 +217,7 @@ class LupaEmpresaScreen extends StatelessWidget {
                     ),
                     SizedBox(height: 20),
                     Text(
-                      'Dominio',
+                      'Dominio/Placa/N° de Serie/N° de Chasis',
                       style: TextStyle(
                         fontFamily: 'Montserrat',
                         fontSize: 16,
@@ -255,7 +245,7 @@ class LupaEmpresaScreen extends StatelessWidget {
                                 color: Colors.grey,
                               ),
                               filled: true,
-                              fillColor: Colors.grey[200], // Fondo gris claro
+                              fillColor: Colors.grey[200],
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide.none,
@@ -266,21 +256,127 @@ class LupaEmpresaScreen extends StatelessWidget {
                         SizedBox(width: 8),
                         Container(
                           decoration: BoxDecoration(
-                            color: Color(0xFF43b6ed), // Fondo del botón de la lupa
+                            color: Color(0xFF43b6ed),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: IconButton(
-                            icon: Icon(Icons.search, color: Colors.white), // Icono blanco
+                            icon: Icon(Icons.search, color: Colors.white),
                             onPressed: () {},
                           ),
                         ),
                       ],
                     ),
+                    if (showContractorInfo) ...[
+                      SizedBox(height: 30),
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'BANCOR S.A.',
+                              style: TextStyle(
+                                fontFamily: 'Montserrat',
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF232e5f),
+                              ),
+                            ),
+                            SizedBox(height: 20),
+                            Container(
+                              padding: EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.green[300],
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'CONTRATISTA HABILITADO',
+                                  style: TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    fontSize: 16,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            SizedBox(height: 20),
+                            Text(
+                              'Razón Social: ABC CONSULTING',
+                              style: TextStyle(
+                                fontFamily: 'Montserrat',
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text('CUIT: 30709035262'),
+                            Text('Tipo persona: Persona Jurídica'),
+                            Text('Tipo trabajador: Empleados en Relación de Dependencia'),
+                            Text('Actividades: -'),
+                            SizedBox(height: 20),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: () {},
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.grey[200],
+                                      padding: EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                    icon: Icon(Icons.people, color: Colors.black54),
+                                    label: Text(
+                                      'Empleados',
+                                      style: TextStyle(color: Colors.black54),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: () {},
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.grey[200],
+                                      padding: EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                    icon: Icon(Icons.directions_car, color: Colors.black54),
+                                    label: Text(
+                                      'Vehículos',
+                                      style: TextStyle(color: Colors.black54),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 20),
+                            Center(
+                              child: ElevatedButton.icon(
+                                onPressed: () {},
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey[300],
+                                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                ),
+                                icon: Icon(Icons.print, color: Colors.black54),
+                                label: Text(
+                                  'Imprimir',
+                                  style: TextStyle(color: Colors.black54),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ]
                   ],
                 ),
               ),
               SizedBox(height: 30),
-              // Logo de InfoControl al final
               Center(
                 child: Image.asset(
                   'assets/infocontrol_logo.png',
