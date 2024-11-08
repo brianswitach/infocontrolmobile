@@ -3,18 +3,23 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String _baseUrl = 'https://www.infocontrol.com.ar/desarrollo_v2';
-  
+  static const String _baseUrl = 'https://www.infocontrol.tech';
+
   Future<String?> login(String username, String password) async {
-    final url = Uri.parse('$_baseUrl/api/web/workers/login');
+    final url = Uri.parse('$_baseUrl/web/api/web/workers/login');
     
-    final response = await http.get(
+    // Modificación a POST con envío de datos en el cuerpo
+    final response = await http.post(
       url,
       headers: <String, String>{
-        'Authorization': 'Basic ${base64Encode(utf8.encode('$username:$password'))}',
+        'Content-Type': 'application/json',
       },
+      body: jsonEncode(<String, String>{
+        'username': username,
+        'password': password,
+      }),
     );
-    
+
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       if (data['status'] == true) {
@@ -23,7 +28,7 @@ class ApiService {
         throw Exception(data['message']);
       }
     } else {
-      throw Exception('Error al hacer login');
+      throw Exception('Código de error: ${response.statusCode} - ${response.reasonPhrase}');
     }
   }
 }

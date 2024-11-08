@@ -98,7 +98,7 @@ class _LoginScreenState extends State<LoginScreen> {
         builder: (context) {
           return AlertDialog(
             title: Text('Error'),
-            content: Text('Usuario o contraseña incorrectos'),
+            content: Text('Código de error: $e'),
             actions: [
               TextButton(
                 onPressed: () {
