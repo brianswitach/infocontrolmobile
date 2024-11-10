@@ -1,13 +1,95 @@
 import 'package:flutter/material.dart';
-import 'empresa_screen.dart'; // Importa la nueva pantalla
+import 'empresa_screen.dart';
+import '../services/api_service.dart'; // Importa ApiService
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class HomeScreen extends StatefulWidget {
+  final String bearerToken;
+  final ApiService apiService; // Añade apiService como un parámetro requerido
+
+  HomeScreen({required this.bearerToken, required this.apiService}); // Modifica el constructor
+
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _showPendingMessages = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _showHeaders(); // Muestra los headers antes de hacer la solicitud
+  }
+
+  Future<void> _showHeaders() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Headers'),
+        content: Text(
+          'KEY: Authorization\nVALUE: Bearer ${widget.bearerToken}\n\n'
+          'KEY: Content-Type\nVALUE: application/json',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _fetchEmpresas(); // Realiza la solicitud después de mostrar los headers
+            },
+            child: Text('Aceptar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _fetchEmpresas() async {
+  final url = Uri.parse('https://www.infocontrol.tech/web/api/mobile/empresas/listar');
+  try {
+    final response = await http.get(
+      url,
+      headers: {
+        'Authorization': 'Bearer ${widget.bearerToken}',
+      },
+    );
+
+    // Muestra el código de respuesta en un cuadro de diálogo
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Código de Respuesta'),
+        content: Text('Código de estado: ${response.statusCode}\n\nRespuesta: ${response.body}'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: Text('Aceptar'),
+          ),
+        ],
+      ),
+    );
+  } catch (e) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Error'),
+        content: Text('Error al realizar la solicitud: $e'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: Text('Aceptar'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +296,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               SizedBox(height: 20),
-              // Primera empresa con logo, nombre e icono "Integral"
               GestureDetector(
                 onTap: () {
                   Navigator.push(
@@ -259,7 +340,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              // Campos en blanco adicionales
               for (int i = 0; i < 4; i++)
                 Container(
                   margin: EdgeInsets.only(bottom: 12),

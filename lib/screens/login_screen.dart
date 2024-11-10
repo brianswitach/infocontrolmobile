@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'home_screen.dart'; // Asegúrate de que la ruta de importación sea correcta
-import '../services/api_service.dart'; // Ruta actualizada para el servicio de API
+import 'home_screen.dart';
+import '../services/api_service.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -11,9 +11,9 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final ApiService _apiService = ApiService(); // Instancia de ApiService
-  String _language = 'es'; // Idioma predeterminado: español
-  bool _showPendingMessages = false; // Variable para el estado del checkbox "Recordar datos"
+  final ApiService _apiService = ApiService();
+  String _language = 'es';
+  bool _showPendingMessages = false;
 
   void _changeLanguage(String language) {
     setState(() {
@@ -22,6 +22,45 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String getText(String key) {
+    final Map<String, String> _spanishText = {
+      'login': 'Iniciar sesión',
+      'subtitle': 'Complete con sus datos para continuar',
+      'userField': 'Usuario / Nº Identidad',
+      'passwordField': 'Contraseña',
+      'rememberData': 'Recordar datos',
+      'forgotPassword': '¿Olvidaste tu contraseña?',
+      'loginButton': 'Ingresar',
+      'promoTitle': 'Optimizá la gestión de tus contratistas con IA',
+      'promoSubtitle': 'Control integral, resultados sobresalientes.',
+      'learnMore': 'Conocer más',
+    };
+
+    final Map<String, String> _englishText = {
+      'login': 'Log in',
+      'subtitle': 'Fill in your details to continue',
+      'userField': 'User / ID Number',
+      'passwordField': 'Password',
+      'rememberData': 'Remember me',
+      'forgotPassword': 'Forgot your password?',
+      'loginButton': 'Log in',
+      'promoTitle': 'Optimize contractor management with AI',
+      'promoSubtitle': 'Comprehensive control, outstanding results.',
+      'learnMore': 'Learn more',
+    };
+
+    final Map<String, String> _portugueseText = {
+      'login': 'Iniciar sessão',
+      'subtitle': 'Complete com seus dados para continuar',
+      'userField': 'Usuário / Nº Identidade',
+      'passwordField': 'Senha',
+      'rememberData': 'Lembrar dados',
+      'forgotPassword': 'Esqueceu sua senha?',
+      'loginButton': 'Entrar',
+      'promoTitle': 'Otimize a gestão de seus contratados com IA',
+      'promoSubtitle': 'Controle integral, resultados excelentes.',
+      'learnMore': 'Saiba mais',
+    };
+
     switch (_language) {
       case 'es':
         return _spanishText[key] ?? '';
@@ -33,45 +72,6 @@ class _LoginScreenState extends State<LoginScreen> {
         return '';
     }
   }
-
-  final Map<String, String> _spanishText = {
-    'login': 'Iniciar sesión',
-    'subtitle': 'Complete con sus datos para continuar',
-    'userField': 'Usuario / Nº Identidad',
-    'passwordField': 'Contraseña',
-    'rememberData': 'Recordar datos',
-    'forgotPassword': '¿Olvidaste tu contraseña?',
-    'loginButton': 'Ingresar',
-    'promoTitle': 'Optimizá la gestión de tus contratistas con IA',
-    'promoSubtitle': 'Control integral, resultados sobresalientes.',
-    'learnMore': 'Conocer más',
-  };
-
-  final Map<String, String> _englishText = {
-    'login': 'Log in',
-    'subtitle': 'Fill in your details to continue',
-    'userField': 'User / ID Number',
-    'passwordField': 'Password',
-    'rememberData': 'Remember me',
-    'forgotPassword': 'Forgot your password?',
-    'loginButton': 'Log in',
-    'promoTitle': 'Optimize contractor management with AI',
-    'promoSubtitle': 'Comprehensive control, outstanding results.',
-    'learnMore': 'Learn more',
-  };
-
-  final Map<String, String> _portugueseText = {
-    'login': 'Iniciar sessão',
-    'subtitle': 'Complete com seus dados para continuar',
-    'userField': 'Usuário / Nº Identidade',
-    'passwordField': 'Senha',
-    'rememberData': 'Lembrar dados',
-    'forgotPassword': 'Esqueceu sua senha?',
-    'loginButton': 'Entrar',
-    'promoTitle': 'Otimize a gestão de seus contratados com IA',
-    'promoSubtitle': 'Controle integral, resultados excelentes.',
-    'learnMore': 'Saiba mais',
-  };
 
   Future<void> _launchURL() async {
     final Uri url = Uri.parse('https://www.infocontrolweb.com/inteligencia_artificial');
@@ -89,7 +89,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (token != null) {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => HomeScreen()),
+          MaterialPageRoute(
+            builder: (context) => HomeScreen(apiService: _apiService, bearerToken: token),
+          ),
         );
       }
     } catch (e) {
