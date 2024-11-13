@@ -1,7 +1,9 @@
+// lib/screens/login_screen.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'home_screen.dart';
-import '../services/api_service.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -9,11 +11,12 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final ApiService _apiService = ApiService();
+  final TextEditingController _usernameController = TextEditingController(text: "API.30511190238");
+  final TextEditingController _passwordController = TextEditingController(text: "Inf0C0ntr0l2023");
+  String bearerToken = "";
   String _language = 'es';
   bool _showPendingMessages = false;
+  List<Map<String, dynamic>> empresas = [];  // Cambio de tipo aquí
 
   void _changeLanguage(String language) {
     setState(() {
@@ -73,45 +76,63 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _launchURL() async {
-    final Uri url = Uri.parse('https://www.infocontrolweb.com/inteligencia_artificial');
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      print('Error al abrir el enlace $url');
-    }
-  }
-
-  Future<void> _login() async {
-    final username = _usernameController.text;
-    final password = _passwordController.text;
+  Future<void> login(BuildContext context) async {
+    String loginUrl = "https://www.infocontrol.com.ar/desarrollo_v2/api/web/workers/login";
+    String username = _usernameController.text;
+    String password = _passwordController.text;
+    String basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
 
     try {
-      final token = await _apiService.login(username, password);
-      if (token != null) {
+      final loginResponse = await http.post(
+        Uri.parse(loginUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': basicAuth,
+        },
+      );
+
+      if (loginResponse.statusCode == 200) {
+        final loginData = jsonDecode(loginResponse.body);
+        bearerToken = loginData['data']['Bearer'];
+        setState(() {
+          _showPendingMessages = true;
+        });
+
+        await sendRequest();
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => HomeScreen(apiService: _apiService, bearerToken: token),
+            builder: (context) => HomeScreen(bearerToken: bearerToken, empresas: empresas),
           ),
         );
+      } else {
+        // Manejar error de login si es necesario
       }
     } catch (e) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: Text('Error'),
-            content: Text('Código de error: $e'),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                child: Text('Aceptar'),
-              ),
-            ],
-          );
+      // Manejar error de conexión si es necesario
+    }
+  }
+
+  Future<void> sendRequest() async {
+    String listarUrl = "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/listar";
+
+    try {
+      final response = await http.get(
+        Uri.parse(listarUrl),
+        headers: {
+          HttpHeaders.contentTypeHeader: "application/json",
+          HttpHeaders.authorizationHeader: "Bearer $bearerToken",
         },
       );
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        empresas = List<Map<String, dynamic>>.from(responseData['data']);
+      } else {
+        // Manejar error de solicitud si es necesario
+      }
+    } catch (e) {
+      // Manejar error de conexión si es necesario
     }
   }
 
@@ -258,7 +279,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           SizedBox(height: 16),
                           ElevatedButton(
-                            onPressed: _login,
+                            onPressed: () => login(context),
                             style: ElevatedButton.styleFrom(
                               padding: EdgeInsets.symmetric(horizontal: 40, vertical: 12),
                               backgroundColor: Colors.blue,
@@ -302,25 +323,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               fontFamily: 'Montserrat',
                               fontSize: 16,
                               color: Colors.white70,
-                            ),
-                          ),
-                          SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: _launchURL,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: Text(
-                              getText('learnMore'),
-                              style: TextStyle(
-                                fontFamily: 'Montserrat',
-                                fontSize: 16,
-                                color: Colors.white,
-                              ),
                             ),
                           ),
                         ],

@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'lupa_empresa.dart'; // Asegúrate de importar la pantalla "lupa_empresa.dart"
 
 class EmpresaScreen extends StatefulWidget {
+  final Map<String, dynamic> empresa;
+
+  EmpresaScreen({required this.empresa});
+
   @override
   _EmpresaScreenState createState() => _EmpresaScreenState();
 }
@@ -22,7 +26,9 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => LupaEmpresaScreen()),
+                  MaterialPageRoute(
+                    builder: (context) => LupaEmpresaScreen(empresa: widget.empresa),
+                  ),
                 );
               },
             ),
@@ -36,7 +42,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               backgroundColor: Color(0xFF232e63),
               radius: 15,
               child: Text(
-                'B', // Logo temporal
+                widget.empresa['nombre']?[0] ?? 'B',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -64,7 +70,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Logo de InfoControl
                     Center(
                       child: Image.asset(
                         'assets/infocontrol_logo.png',
@@ -72,12 +77,11 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                       ),
                     ),
                     SizedBox(height: 15),
-                    // Logo temporal de la empresa "BANCOR S.A." con la letra "B"
                     CircleAvatar(
                       backgroundColor: Colors.blueAccent,
                       radius: 30,
                       child: Text(
-                        'B',
+                        widget.empresa['nombre']?[0] ?? 'B',
                         style: TextStyle(
                           fontFamily: 'Montserrat',
                           fontSize: 24,
@@ -87,7 +91,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                       ),
                     ),
                     SizedBox(height: 15),
-                    // Nombre del usuario
                     Center(
                       child: Text(
                         'Switach, Brian',
@@ -137,14 +140,14 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
             children: [
               GestureDetector(
                 onTap: () {
-                  Navigator.pop(context); // Vuelve a la pantalla anterior
+                  Navigator.pop(context);
                 },
                 child: Row(
                   children: [
                     Icon(Icons.arrow_back, color: Color(0xFF9dbdfd)),
                     SizedBox(width: 8),
                     Text(
-                      'Seleccionar contratista para su información',
+                      'Seleccionar contratista',
                       style: TextStyle(
                         color: Color(0xFF9dbdfd),
                         fontFamily: 'Montserrat',
@@ -158,7 +161,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               Row(
                 children: [
                   Text(
-                    'BANCOR S.A.',
+                    widget.empresa['nombre'] ?? 'Nombre de la empresa',
                     style: TextStyle(
                       fontFamily: 'Montserrat',
                       fontSize: 20,
@@ -169,7 +172,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                   SizedBox(width: 8),
                   Image.asset(
                     'assets/integral_icon.png',
-                    width: 100, // Tamaño ajustado del ícono
+                    width: 100,
                   ),
                 ],
               ),
