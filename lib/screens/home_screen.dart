@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'empresa_screen.dart'; // Asegúrate de que este archivo esté bien importado
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:io';
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
@@ -17,6 +20,47 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+  }
+
+  Future<void> getEmpresaDetails(String empresaId) async {
+    // URL del endpoint
+    String url = "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId";
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          HttpHeaders.contentTypeHeader: "application/json",
+          HttpHeaders.authorizationHeader: "Bearer ${widget.bearerToken}",
+          'auth-type': 'no-auth',  // Se asegura de que se manda 'no-auth'
+        },
+      );
+
+      if (response.statusCode == 200) {
+        var responseData = jsonDecode(response.body);
+
+        // Extraemos los nombres de las instalaciones de la respuesta
+        List<String> nombresInstalaciones = [];
+        if (responseData['data']['instalaciones'] != null) {
+          for (var instalacion in responseData['data']['instalaciones']) {
+            nombresInstalaciones.add(instalacion['nombre']);
+          }
+        }
+
+        // Ahora solo guardamos los nombres de las instalaciones
+        // En este caso, solo se van a guardar los nombres en la lista
+        setState(() {
+          // Se puede usar la variable nombresInstalaciones si es necesario, como mostrarla en la interfaz
+          print("Nombres de las instalaciones: $nombresInstalaciones");
+        });
+      } else {
+        // Manejar error de solicitud si es necesario
+        print('Error al obtener detalles de la empresa: ${response.statusCode}');
+      }
+    } catch (e) {
+      // Manejar error de conexión si es necesario
+      print('Error de conexión: $e');
+    }
   }
 
   @override
@@ -227,12 +271,8 @@ class _HomeScreenState extends State<HomeScreen> {
               for (var empresa in widget.empresas)
                 GestureDetector(
                   onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => EmpresaScreen(empresa: empresa),
-                      ),
-                    );
+                    // Hacer la solicitud cuando se presione el nombre de la empresa
+                    getEmpresaDetails(empresa['id_empresa_asociada']);
                   },
                   child: Container(
                     margin: EdgeInsets.only(bottom: 12),

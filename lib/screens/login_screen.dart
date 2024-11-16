@@ -17,6 +17,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _showPendingMessages = false;
   List<Map<String, dynamic>> empresas = [];  // Cambio de tipo aquí
 
+  // Agregar variables para el nombre y el ID de la empresa
+  String? empresaNombre;
+  String? empresaId;
+
   void _changeLanguage(String language) {
     setState(() {
       _language = language;
@@ -98,6 +102,8 @@ class _LoginScreenState extends State<LoginScreen> {
         });
 
         await sendRequest();
+        
+        // Ahora simplemente navegar a la siguiente pantalla sin mostrar el cartel
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -127,6 +133,12 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
         empresas = List<Map<String, dynamic>>.from(responseData['data']);
+        
+        // Guardamos el nombre y el ID de la primera empresa en la lista
+        setState(() {
+          empresaNombre = empresas[0]['nombre'];
+          empresaId = empresas[0]['id_empresa_asociada'];
+        });
       } else {
         // Manejar error de solicitud si es necesario
       }
