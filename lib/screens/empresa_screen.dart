@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'lupa_empresa.dart'; // Importamos la pantalla lupa_empresa.dart
 
 class EmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
@@ -23,9 +24,18 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
           elevation: 0,
           iconTheme: IconThemeData(color: Colors.black),
           actions: [
+            // Lupa de búsqueda en la barra de navegación
             IconButton(
               icon: Icon(Icons.search, color: Color(0xFF2a3666)),
-              onPressed: () {},
+              onPressed: () {
+                // Redirige a LupaEmpresaScreen
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => LupaEmpresaScreen(empresa: widget.empresa),
+                  ),
+                );
+              },
             ),
             Container(
               height: 24,

@@ -3,6 +3,7 @@ import 'empresa_screen.dart'; // Asegúrate de que este archivo esté bien impor
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import 'lupa_empresa.dart'; // Importamos LupaEmpresaScreen
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
@@ -48,8 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        // Ahora solo guardamos los nombres de las instalaciones
-        // En este caso, solo se van a guardar los nombres en la lista
+        // Si hay instalaciones, abre la pantalla EmpresaScreen, sino abre LupaEmpresaScreen
         setState(() {
           if (nombresInstalaciones.isNotEmpty) {
             Navigator.push(
@@ -64,7 +64,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             );
           } else {
-            print("No hay instalaciones disponibles.");
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => LupaEmpresaScreen(empresa: widget.empresas.firstWhere(
+                  (empresa) => empresa['id_empresa_asociada'] == empresaId,
+                )),
+              ),
+            );
           }
         });
       } else {
