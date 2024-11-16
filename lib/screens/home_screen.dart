@@ -22,6 +22,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
   }
 
+  // Método para obtener las instalaciones de una empresa
   Future<void> getEmpresaDetails(String empresaId) async {
     // URL del endpoint
     String url = "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId";
@@ -43,15 +44,28 @@ class _HomeScreenState extends State<HomeScreen> {
         List<String> nombresInstalaciones = [];
         if (responseData['data']['instalaciones'] != null) {
           for (var instalacion in responseData['data']['instalaciones']) {
-            nombresInstalaciones.add(instalacion['nombre']);
+            nombresInstalaciones.add(instalacion['nombre'].toString());  // Aseguramos que sea String
           }
         }
 
         // Ahora solo guardamos los nombres de las instalaciones
         // En este caso, solo se van a guardar los nombres en la lista
         setState(() {
-          // Se puede usar la variable nombresInstalaciones si es necesario, como mostrarla en la interfaz
-          print("Nombres de las instalaciones: $nombresInstalaciones");
+          if (nombresInstalaciones.isNotEmpty) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => EmpresaScreen(
+                  empresa: widget.empresas.firstWhere(
+                    (empresa) => empresa['id_empresa_asociada'] == empresaId,
+                  ),
+                  instalaciones: nombresInstalaciones,  // Se pasa la lista de instalaciones
+                ),
+              ),
+            );
+          } else {
+            print("No hay instalaciones disponibles.");
+          }
         });
       } else {
         // Manejar error de solicitud si es necesario

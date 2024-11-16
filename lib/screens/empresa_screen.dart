@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'lupa_empresa.dart'; // Asegúrate de importar la pantalla "lupa_empresa.dart"
 
 class EmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
+  final List<String> instalaciones; // Se pasa la lista de instalaciones
 
-  EmpresaScreen({required this.empresa});
+  EmpresaScreen({required this.empresa, required this.instalaciones});
 
   @override
   _EmpresaScreenState createState() => _EmpresaScreenState();
@@ -13,6 +13,8 @@ class EmpresaScreen extends StatefulWidget {
 class _EmpresaScreenState extends State<EmpresaScreen> {
   @override
   Widget build(BuildContext context) {
+    List<String> instalaciones = widget.instalaciones;
+
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
@@ -23,14 +25,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
           actions: [
             IconButton(
               icon: Icon(Icons.search, color: Color(0xFF2a3666)),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => LupaEmpresaScreen(empresa: widget.empresa),
-                  ),
-                );
-              },
+              onPressed: () {},
             ),
             Container(
               height: 24,
@@ -131,175 +126,86 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
           ),
         ),
       ),
-      body: SingleChildScrollView(
-        child: Container(
-          color: Color(0xFFF2F4FF),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                onTap: () {
-                  Navigator.pop(context);
-                },
-                child: Row(
-                  children: [
-                    Icon(Icons.arrow_back, color: Color(0xFF9dbdfd)),
-                    SizedBox(width: 8),
-                    Text(
-                      'Seleccionar contratista',
-                      style: TextStyle(
-                        color: Color(0xFF9dbdfd),
-                        fontFamily: 'Montserrat',
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(height: 20),
-              Row(
+      body: Container(
+        color: Color(0xFFF2F5FE), // Fondo de la pantalla
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onTap: () {
+                Navigator.pop(context);
+              },
+              child: Row(
                 children: [
-                  Text(
-                    widget.empresa['nombre'] ?? 'Nombre de la empresa',
-                    style: TextStyle(
-                      fontFamily: 'Montserrat',
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF232e5f),
-                    ),
-                  ),
+                  Icon(Icons.arrow_back, color: Color(0xFF9dbdfd)),
                   SizedBox(width: 8),
-                  Image.asset(
-                    'assets/integral_icon.png',
-                    width: 100,
+                  Text(
+                    'Seleccionar contratista',
+                    style: TextStyle(
+                      color: Color(0xFF9dbdfd),
+                      fontFamily: 'Montserrat',
+                      fontSize: 16,
+                    ),
                   ),
                 ],
               ),
-              SizedBox(height: 30),
-              Text(
-                'Buscar:',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  color: Colors.black,
-                ),
-              ),
-              SizedBox(height: 10),
-              TextField(
-                decoration: InputDecoration(
-                  hintText: 'Buscar por nombre de contratista',
-                  hintStyle: TextStyle(
+            ),
+            SizedBox(height: 20),
+            Row(
+              children: [
+                Text(
+                  widget.empresa['nombre'] ?? 'Nombre de la empresa',
+                  style: TextStyle(
                     fontFamily: 'Montserrat',
-                    color: Colors.grey,
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF232e5f),
                   ),
                 ),
-              ),
-              SizedBox(height: 20),
-              Text(
-                'País:',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  color: Colors.black,
+                SizedBox(width: 8),
+                Image.asset(
+                  'assets/integral_icon.png',
+                  width: 100,
                 ),
-              ),
-              SizedBox(height: 10),
-              TextField(
-                decoration: InputDecoration(
-                  hintText: 'Seleccione una opción',
-                  hintStyle: TextStyle(
-                    fontFamily: 'Montserrat',
-                    color: Colors.grey,
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-              SizedBox(height: 20),
-              Text(
-                'Tipo de contratista:',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  color: Colors.black,
-                ),
-              ),
-              SizedBox(height: 10),
-              TextField(
-                decoration: InputDecoration(
-                  hintText: 'Seleccione una opción',
-                  hintStyle: TextStyle(
-                    fontFamily: 'Montserrat',
-                    color: Colors.grey,
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-              SizedBox(height: 20),
-              Text(
-                'Categoría contratista:',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  color: Colors.black,
-                ),
-              ),
-              SizedBox(height: 10),
-              TextField(
-                decoration: InputDecoration(
-                  hintText: 'Seleccione una opción o varias opciones',
-                  hintStyle: TextStyle(
-                    fontFamily: 'Montserrat',
-                    color: Colors.grey,
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-              SizedBox(height: 30),
-              Center(
-                child: ElevatedButton.icon(
-                  onPressed: () {},
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF4080ff),
-                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+              ],
+            ),
+            SizedBox(height: 30),
+            Expanded( // Se agrega Expanded para que los campos ocupen toda la pantalla
+              child: instalaciones.isNotEmpty
+                  ? ListView.builder(
+                      itemCount: instalaciones.length,
+                      itemBuilder: (context, index) {
+                        return Container(
+                          margin: EdgeInsets.only(bottom: 12),
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            instalaciones[index] ?? 'Nombre de instalación no disponible',
+                            style: TextStyle(
+                              fontFamily: 'Montserrat',
+                              fontSize: 14,
+                              color: Colors.black,
+                            ),
+                          ),
+                        );
+                      },
+                    )
+                  : Center(
+                      child: Text(
+                        'No hay instalaciones disponibles.',
+                        style: TextStyle(
+                          fontFamily: 'Montserrat',
+                          fontSize: 16,
+                          color: Colors.black,
+                        ),
+                      ),
                     ),
-                  ),
-                  icon: Icon(Icons.download, color: Colors.white),
-                  label: Text(
-                    'Generar excel',
-                    style: TextStyle(
-                      fontFamily: 'Montserrat',
-                      fontSize: 16,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
