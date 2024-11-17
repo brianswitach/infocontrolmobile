@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'empresa_screen.dart'; // Asegúrate de que este archivo esté bien importado
+import './empresa_screen.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
-import 'lupa_empresa.dart'; // Importamos LupaEmpresaScreen
+import './lupa_empresa.dart';
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
@@ -23,9 +23,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
   }
 
-  // Método para obtener las instalaciones de una empresa
   Future<void> getEmpresaDetails(String empresaId) async {
-    // URL del endpoint
     String url = "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId";
 
     try {
@@ -34,56 +32,59 @@ class _HomeScreenState extends State<HomeScreen> {
         headers: {
           HttpHeaders.contentTypeHeader: "application/json",
           HttpHeaders.authorizationHeader: "Bearer ${widget.bearerToken}",
-          'auth-type': 'no-auth',  // Se asegura de que se manda 'no-auth'
+          'auth-type': 'no-auth',
         },
       );
 
       if (response.statusCode == 200) {
         var responseData = jsonDecode(response.body);
 
-        // Extraemos los nombres de las instalaciones de la respuesta
         List<String> nombresInstalaciones = [];
         if (responseData['data']['instalaciones'] != null) {
           for (var instalacion in responseData['data']['instalaciones']) {
-            nombresInstalaciones.add(instalacion['nombre'].toString());  // Aseguramos que sea String
+            nombresInstalaciones.add(instalacion['nombre'].toString());
           }
         }
 
-        // Si hay instalaciones, abre la pantalla EmpresaScreen, sino abre LupaEmpresaScreen
-        setState(() {
-          if (nombresInstalaciones.isNotEmpty) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => EmpresaScreen(
-                  empresa: widget.empresas.firstWhere(
-                    (empresa) => empresa['id_empresa_asociada'] == empresaId,
-                  ),
-                  instalaciones: nombresInstalaciones,  // Se pasa la lista de instalaciones
-                ),
+        final empresaData = Map<String, dynamic>.from(
+          widget.empresas.firstWhere(
+            (empresa) => empresa['id_empresa_asociada'] == empresaId,
+          ),
+        );
+        empresaData['bearerToken'] = widget.bearerToken;
+
+        if (!mounted) return;
+
+        if (nombresInstalaciones.isNotEmpty) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EmpresaScreen(
+                empresa: empresaData,
+                instalaciones: nombresInstalaciones,
               ),
-            );
-          } else {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => LupaEmpresaScreen(empresa: widget.empresas.firstWhere(
-                  (empresa) => empresa['id_empresa_asociada'] == empresaId,
-                )),
+            ),
+          );
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => LupaEmpresaScreen(
+                empresa: empresaData,
+                bearerToken: widget.bearerToken,
+                idEmpresaAsociada: empresaId,
               ),
-            );
-          }
-        });
+            ),
+          );
+        }
       } else {
-        // Manejar error de solicitud si es necesario
         print('Error al obtener detalles de la empresa: ${response.statusCode}');
       }
     } catch (e) {
-      // Manejar error de conexión si es necesario
       print('Error de conexión: $e');
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -292,7 +293,6 @@ class _HomeScreenState extends State<HomeScreen> {
               for (var empresa in widget.empresas)
                 GestureDetector(
                   onTap: () {
-                    // Hacer la solicitud cuando se presione el nombre de la empresa
                     getEmpresaDetails(empresa['id_empresa_asociada']);
                   },
                   child: Container(

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
-import 'lupa_empresa.dart'; // Importamos la pantalla lupa_empresa.dart
+import './lupa_empresa.dart';
 
 class EmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
-  final List<String> instalaciones; // Se pasa la lista de instalaciones
+  final List<String> instalaciones;
 
-  EmpresaScreen({required this.empresa, required this.instalaciones});
+  EmpresaScreen({
+    required this.empresa,
+    required this.instalaciones,
+  });
 
   @override
   _EmpresaScreenState createState() => _EmpresaScreenState();
@@ -24,15 +27,17 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
           elevation: 0,
           iconTheme: IconThemeData(color: Colors.black),
           actions: [
-            // Lupa de búsqueda en la barra de navegación
             IconButton(
               icon: Icon(Icons.search, color: Color(0xFF2a3666)),
               onPressed: () {
-                // Redirige a LupaEmpresaScreen
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => LupaEmpresaScreen(empresa: widget.empresa),
+                    builder: (context) => LupaEmpresaScreen(
+                      empresa: widget.empresa,
+                      bearerToken: widget.empresa['bearerToken'] ?? '',
+                      idEmpresaAsociada: widget.empresa['id_empresa_asociada'] ?? '',
+                    ),
                   ),
                 );
               },
@@ -137,7 +142,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
         ),
       ),
       body: Container(
-        color: Color(0xFFF2F5FE), // Fondo de la pantalla
+        color: Color(0xFFF2F5FE),
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -181,7 +186,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               ],
             ),
             SizedBox(height: 30),
-            Expanded( // Se agrega Expanded para que los campos ocupen toda la pantalla
+            Expanded(
               child: instalaciones.isNotEmpty
                   ? ListView.builder(
                       itemCount: instalaciones.length,
@@ -194,7 +199,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            instalaciones[index] ?? 'Nombre de instalación no disponible',
+                            instalaciones[index],
                             style: TextStyle(
                               fontFamily: 'Montserrat',
                               fontSize: 14,
