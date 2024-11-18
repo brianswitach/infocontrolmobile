@@ -236,6 +236,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                           isLoadingContractors
                               ? Center(child: CircularProgressIndicator())
                               : DropdownButtonFormField<String>(
+  isExpanded: true, // Agregamos esta línea para evitar el overflow
   items: empleados
     .map((e) => e['nombre_razon_social']?.toString() ?? '')
     .toSet()  // Convertimos a Set para eliminar duplicados
@@ -247,6 +248,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           style: TextStyle(
             fontFamily: 'Montserrat',
           ),
+          overflow: TextOverflow.ellipsis, // Agregamos esto para manejar textos largos
+          maxLines: 1, // Limitamos a una línea
         ),
       );
     }).toList(),
