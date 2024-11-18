@@ -20,6 +20,8 @@ class LupaEmpresaScreen extends StatefulWidget {
 class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractor;
   String? selectedContractorCuit;
+  String? selectedContractorTipo;
+  String? selectedContractorMensajeGeneral;
   bool showContractorInfo = false;
   bool showEmployees = false;
   List<dynamic> empleados = [];
@@ -97,6 +99,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     setState(() {
       selectedContractor = nombreRazonSocial;
       selectedContractorCuit = empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
+      selectedContractorTipo = empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
+      selectedContractorMensajeGeneral = empleadoSeleccionado != null ? empleadoSeleccionado['mensaje_general'] : '';
       showContractorInfo = true;
     });
   }
@@ -396,12 +400,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   Container(
                                     padding: EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      color: Colors.green[300],
+                                      color: selectedContractorMensajeGeneral?.toLowerCase().contains('inhabilitado') == true 
+                                          ? Colors.red[300] 
+                                          : Colors.green[300],
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Center(
                                       child: Text(
-                                        'CONTRATISTA HABILITADO',
+                                        selectedContractorMensajeGeneral?.toLowerCase().contains('inhabilitado') == true
+                                            ? 'CONTRATISTA INHABILITADO'
+                                            : 'CONTRATISTA HABILITADO',
                                         style: TextStyle(
                                           fontFamily: 'Montserrat',
                                           fontSize: 16,
@@ -422,8 +430,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   ),
                                   SizedBox(height: 8),
                                   Text('CUIT: ${selectedContractorCuit ?? 'No disponible'}'),
-                                  Text('Tipo persona: Persona Jurídica'),
-                                  Text('Tipo trabajador: Empleados en Relación de Dependencia'),
+                                  Text('Tipo persona: -'),
+                                  Text('Tipo trabajador: ${selectedContractorTipo ?? 'No disponible'}'),
                                   Text('Actividades: -'),
                                   SizedBox(height: 20),
                                   Row(
