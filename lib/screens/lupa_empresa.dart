@@ -23,6 +23,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   bool showEmployees = false;
   List<dynamic> empleados = [];
   bool isLoading = true;
+  bool isLoadingContractors = false;
 
   @override
   void initState() {
@@ -31,80 +32,79 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> obtenerEmpleados() async {
-  try {
-    print('Bearer Token: ${widget.bearerToken}');
-    print('ID Empresa Asociada: ${widget.idEmpresaAsociada}');
+    try {
+      print('Bearer Token: ${widget.bearerToken}');
+      print('ID Empresa Asociada: ${widget.idEmpresaAsociada}');
 
-    final response = await http.get(
-      Uri.parse('https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar')
-          .replace(queryParameters: {
-        'id_empresas': widget.idEmpresaAsociada,
-      }),
-      headers: {
-        'Authorization': 'Bearer ${widget.bearerToken}',
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    );
+      final response = await http.get(
+        Uri.parse('https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar')
+            .replace(queryParameters: {
+          'id_empresas': widget.idEmpresaAsociada,
+        }),
+        headers: {
+          'Authorization': 'Bearer ${widget.bearerToken}',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
 
-    print('Response headers: ${response.headers}');
-    print('Response body raw: ${response.body}');
+      print('Response headers: ${response.headers}');
+      print('Response body raw: ${response.body}');
 
-    if (response.statusCode == 200) {
-      final responseData = jsonDecode(response.body);
-      print('Response completa: $responseData');
-      
-      setState(() {
-        empleados = responseData['data'] ?? [];
-        isLoading = false;
-      });
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        print('Response completa: $responseData');
+        
+        setState(() {
+          empleados = responseData['data'] ?? [];
+          isLoading = false;
+        });
 
-      if (responseData['data'] != null && responseData['data'].isNotEmpty) {
-        String nombreRazonSocial = responseData['data'][0]['nombre_razon_social'];
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Se encontró: $nombreRazonSocial'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
+        if (responseData['data'] != null && responseData['data'].isNotEmpty) {
+          String nombreRazonSocial = responseData['data'][0]['nombre_razon_social'];
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Se encontró: $nombreRazonSocial'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('No se encontraron datos de empleados'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
       } else {
+        print('Error al obtener empleados: ${response.statusCode}');
+        setState(() {
+          isLoading = false;
+        });
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('No se encontraron datos de empleados'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 3),
+            content: Text('Error al obtener empleados: ${response.statusCode}'),
+            backgroundColor: Colors.red,
           ),
         );
       }
-    } else {
-      print('Error al obtener empleados: ${response.statusCode}');
+    } catch (e) {
+      print('Error en la solicitud: $e');
       setState(() {
         isLoading = false;
       });
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al obtener empleados: ${response.statusCode}'),
+          content: Text('Error en la solicitud: $e'),
           backgroundColor: Colors.red,
         ),
       );
     }
-  } catch (e) {
-    print('Error en la solicitud: $e');
-    setState(() {
-      isLoading = false;
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Error en la solicitud: $e'),
-        backgroundColor: Colors.red,
-      ),
-    );
   }
-}
-
 
   @override
   Widget build(BuildContext context) {
@@ -233,38 +233,45 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ),
                           ),
                           SizedBox(height: 10),
-                          DropdownButtonFormField<String>(
-                            items: [
-                              DropdownMenuItem(
-                                child: Text("ABC CONSULTING"),
-                                value: "ABC CONSULTING",
-                              ),
-                              DropdownMenuItem(
-                                child: Text("XYZ SERVICES"),
-                                value: "XYZ SERVICES",
-                              ),
-                            ],
-                            onChanged: (value) {
-                              setState(() {
-                                selectedContractor = value;
-                                showContractorInfo = true;
-                              });
-                            },
-                            decoration: InputDecoration(
-                              contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
-                              hintText: 'Seleccione Contratista',
-                              hintStyle: TextStyle(
-                                fontFamily: 'Montserrat',
-                                color: Colors.grey,
-                              ),
-                              filled: true,
-                              fillColor: Colors.grey[200],
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                            ),
-                          ),
+                          isLoadingContractors
+                              ? Center(child: CircularProgressIndicator())
+                              : DropdownButtonFormField<String>(
+  items: empleados
+    .map((e) => e['nombre_razon_social']?.toString() ?? '')
+    .toSet()  // Convertimos a Set para eliminar duplicados
+    .map<DropdownMenuItem<String>>((nombreRazonSocial) {
+      return DropdownMenuItem<String>(
+        value: nombreRazonSocial,
+        child: Text(
+          nombreRazonSocial,
+          style: TextStyle(
+            fontFamily: 'Montserrat',
+          ),
+        ),
+      );
+    }).toList(),
+  value: selectedContractor,
+  onChanged: (value) {
+    setState(() {
+      selectedContractor = value;
+      showContractorInfo = true;
+    });
+  },
+  decoration: InputDecoration(
+    contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+    hintText: 'Seleccione Contratista',
+    hintStyle: TextStyle(
+      fontFamily: 'Montserrat',
+      color: Colors.grey,
+    ),
+    filled: true,
+    fillColor: Colors.grey[200],
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide.none,
+    ),
+  ),
+),
                           SizedBox(height: 20),
                           Text(
                             'Número de Identificación Personal',
@@ -380,7 +387,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    widget.empresa['nombre'] ?? 'Empresa',
+                                    selectedContractor ?? 'Empresa',
                                     style: TextStyle(
                                       fontFamily: 'Montserrat',
                                       fontSize: 20,
@@ -409,7 +416,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   ),
                                   SizedBox(height: 20),
                                   Text(
-                                    'Razón Social: ${widget.empresa['nombre'] ?? 'No disponible'}',
+                                    'Razón Social: ${selectedContractor ?? 'No disponible'}',
                                     style: TextStyle(
                                       fontFamily: 'Montserrat',
                                       fontSize: 16,
@@ -425,7 +432,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   Row(
                                     children: [
                                       Expanded(
-                                        child: ElevatedButton.icon(
+                                        child: ElevatedButton(
                                           onPressed: () {
                                             setState(() {
                                               showEmployees = !showEmployees;
@@ -435,25 +442,37 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                             backgroundColor: Colors.grey[200],
                                             padding: EdgeInsets.symmetric(vertical: 12),
                                           ),
-                                          icon: Icon(Icons.people, color: Colors.black54),
-                                          label: Text(
-                                            'Empleados',
-                                            style: TextStyle(color: Colors.black54),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.people, color: Colors.black54),
+                                              SizedBox(width: 8),
+                                              Text(
+                                                'Empleados',
+                                                style: TextStyle(color: Colors.black54),
+                                              ),
+                                            ],
                                           ),
                                         ),
                                       ),
                                       SizedBox(width: 8),
                                       Expanded(
-                                        child: ElevatedButton.icon(
+                                        child: ElevatedButton(
                                           onPressed: () {},
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.grey[200],
                                             padding: EdgeInsets.symmetric(vertical: 12),
                                           ),
-                                          icon: Icon(Icons.directions_car, color: Colors.black54),
-                                          label: Text(
-                                            'Vehículos',
-                                            style: TextStyle(color: Colors.black54),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.directions_car, color: Colors.black54),
+                                              SizedBox(width: 8),
+                                              Text(
+                                                'Vehículos',
+                                                style: TextStyle(color: Colors.black54),
+                                              ),
+                                            ],
                                           ),
                                         ),
                                       ),
@@ -484,17 +503,23 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                             ),
                                           ),
                                           SizedBox(width: 8),
-                                          ElevatedButton.icon(
+                                          ElevatedButton(
                                             onPressed: () {},
-                                            icon: Icon(Icons.arrow_forward, color: Colors.white, size: 16),
-                                            label: Text(
-                                              'Entrar',
-                                              style: TextStyle(color: Colors.white, fontSize: 12),
-                                            ),
                                             style: ElevatedButton.styleFrom(
                                               backgroundColor: Color(0xFF43b6ed),
                                               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                               minimumSize: Size(60, 30),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.arrow_forward, color: Colors.white, size: 16),
+                                                SizedBox(width: 4),
+                                                Text(
+                                                  'Entrar',
+                                                  style: TextStyle(color: Colors.white, fontSize: 12),
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ],
@@ -503,16 +528,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   ],
                                   SizedBox(height: 20),
                                   Center(
-                                    child: ElevatedButton.icon(
+                                    child: ElevatedButton(
                                       onPressed: () {},
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.grey[300],
                                         padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                                       ),
-                                      icon: Icon(Icons.print, color: Colors.black54),
-                                      label: Text(
-                                        'Imprimir',
-                                        style: TextStyle(color: Colors.black54),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.print, color: Colors.black54),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'Imprimir',
+                                            style: TextStyle(color: Colors.black54),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
