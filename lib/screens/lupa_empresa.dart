@@ -31,50 +31,79 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> obtenerEmpleados() async {
-    try {
-      final response = await http.get(
-        Uri.parse('https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar'),
-        headers: {
-          'Authorization': 'Bearer ${widget.bearerToken}',
-          'id_empresas': widget.idEmpresaAsociada,
-          'Content-Type': 'application/json',
-        },
-      );
+  try {
+    print('Bearer Token: ${widget.bearerToken}');
+    print('ID Empresa Asociada: ${widget.idEmpresaAsociada}');
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Código de respuesta: ${response.statusCode}'),
-          duration: Duration(seconds: 3),
-          backgroundColor: response.statusCode == 200 ? Colors.green : Colors.red,
-        ),
-      );
+    final response = await http.get(
+      Uri.parse('https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar')
+          .replace(queryParameters: {
+        'id_empresas': widget.idEmpresaAsociada,
+      }),
+      headers: {
+        'Authorization': 'Bearer ${widget.bearerToken}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    );
 
-      if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
-        setState(() {
-          empleados = responseData['data'] ?? [];
-          isLoading = false;
-        });
-        print('Empleados obtenidos: ${empleados.length}');
+    print('Response headers: ${response.headers}');
+    print('Response body raw: ${response.body}');
+
+    if (response.statusCode == 200) {
+      final responseData = jsonDecode(response.body);
+      print('Response completa: $responseData');
+      
+      setState(() {
+        empleados = responseData['data'] ?? [];
+        isLoading = false;
+      });
+
+      if (responseData['data'] != null && responseData['data'].isNotEmpty) {
+        String nombreRazonSocial = responseData['data'][0]['nombre_razon_social'];
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Se encontró: $nombreRazonSocial'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
       } else {
-        print('Error al obtener empleados: ${response.statusCode}');
-        setState(() {
-          isLoading = false;
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se encontraron datos de empleados'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
       }
-    } catch (e) {
-      print('Error en la solicitud: $e');
+    } else {
+      print('Error al obtener empleados: ${response.statusCode}');
       setState(() {
         isLoading = false;
       });
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error en la solicitud: $e'),
+          content: Text('Error al obtener empleados: ${response.statusCode}'),
           backgroundColor: Colors.red,
         ),
       );
     }
+  } catch (e) {
+    print('Error en la solicitud: $e');
+    setState(() {
+      isLoading = false;
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error en la solicitud: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
+}
 
 
   @override
