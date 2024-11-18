@@ -19,6 +19,7 @@ class LupaEmpresaScreen extends StatefulWidget {
 
 class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractor;
+  String? selectedContractorCuit;
   bool showContractorInfo = false;
   bool showEmployees = false;
   List<dynamic> empleados = [];
@@ -32,61 +33,73 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> obtenerEmpleados() async {
-  try {
-    print('Bearer Token: ${widget.bearerToken}');
-    print('ID Empresa Asociada: ${widget.idEmpresaAsociada}');
+    try {
+      print('Bearer Token: ${widget.bearerToken}');
+      print('ID Empresa Asociada: ${widget.idEmpresaAsociada}');
 
-    final response = await http.get(
-      Uri.parse('https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar')
-          .replace(queryParameters: {
-        'id_empresas': widget.idEmpresaAsociada,
-      }),
-      headers: {
-        'Authorization': 'Bearer ${widget.bearerToken}',
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    );
+      final response = await http.get(
+        Uri.parse('https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar')
+            .replace(queryParameters: {
+          'id_empresas': widget.idEmpresaAsociada,
+        }),
+        headers: {
+          'Authorization': 'Bearer ${widget.bearerToken}',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
 
-    print('Response headers: ${response.headers}');
-    print('Response body raw: ${response.body}');
+      print('Response headers: ${response.headers}');
+      print('Response body raw: ${response.body}');
 
-    if (response.statusCode == 200) {
-      final responseData = jsonDecode(response.body);
-      print('Response completa: $responseData');
-      
-      setState(() {
-        empleados = responseData['data'] ?? [];
-        isLoading = false;
-      });
-
-    } else {
-      print('Error al obtener empleados: ${response.statusCode}');
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        print('Response completa: $responseData');
+        
+        setState(() {
+          empleados = responseData['data'] ?? [];
+          isLoading = false;
+        });
+      } else {
+        print('Error al obtener empleados: ${response.statusCode}');
+        setState(() {
+          isLoading = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al obtener empleados: ${response.statusCode}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error en la solicitud: $e');
       setState(() {
         isLoading = false;
       });
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al obtener empleados: ${response.statusCode}'),
+          content: Text('Error en la solicitud: $e'),
           backgroundColor: Colors.red,
         ),
       );
     }
-  } catch (e) {
-    print('Error en la solicitud: $e');
-    setState(() {
-      isLoading = false;
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Error en la solicitud: $e'),
-        backgroundColor: Colors.red,
-      ),
-    );
   }
-}
+
+  void updateSelectedContractor(String nombreRazonSocial) {
+    var empleadoSeleccionado = empleados.firstWhere(
+      (empleado) => empleado['nombre_razon_social'] == nombreRazonSocial,
+      orElse: () => null,
+    );
+
+    setState(() {
+      selectedContractor = nombreRazonSocial;
+      selectedContractorCuit = empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
+      showContractorInfo = true;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -218,45 +231,44 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                           isLoadingContractors
                               ? Center(child: CircularProgressIndicator())
                               : DropdownButtonFormField<String>(
-  isExpanded: true, // Agregamos esta línea para evitar el overflow
-  items: empleados
-    .map((e) => e['nombre_razon_social']?.toString() ?? '')
-    .toSet()  // Convertimos a Set para eliminar duplicados
-    .map<DropdownMenuItem<String>>((nombreRazonSocial) {
-      return DropdownMenuItem<String>(
-        value: nombreRazonSocial,
-        child: Text(
-          nombreRazonSocial,
-          style: TextStyle(
-            fontFamily: 'Montserrat',
-          ),
-          overflow: TextOverflow.ellipsis, // Agregamos esto para manejar textos largos
-          maxLines: 1, // Limitamos a una línea
-        ),
-      );
-    }).toList(),
-  value: selectedContractor,
-  onChanged: (value) {
-    setState(() {
-      selectedContractor = value;
-      showContractorInfo = true;
-    });
-  },
-  decoration: InputDecoration(
-    contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
-    hintText: 'Seleccione Contratista',
-    hintStyle: TextStyle(
-      fontFamily: 'Montserrat',
-      color: Colors.grey,
-    ),
-    filled: true,
-    fillColor: Colors.grey[200],
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide.none,
-    ),
-  ),
-),
+                                  isExpanded: true,
+                                  items: empleados
+                                    .map((e) => e['nombre_razon_social']?.toString() ?? '')
+                                    .toSet()
+                                    .map<DropdownMenuItem<String>>((nombreRazonSocial) {
+                                      return DropdownMenuItem<String>(
+                                        value: nombreRazonSocial,
+                                        child: Text(
+                                          nombreRazonSocial,
+                                          style: TextStyle(
+                                            fontFamily: 'Montserrat',
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                      );
+                                    }).toList(),
+                                  value: selectedContractor,
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      updateSelectedContractor(value);
+                                    }
+                                  },
+                                  decoration: InputDecoration(
+                                    contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                                    hintText: 'Seleccione Contratista',
+                                    hintStyle: TextStyle(
+                                      fontFamily: 'Montserrat',
+                                      color: Colors.grey,
+                                    ),
+                                    filled: true,
+                                    fillColor: Colors.grey[200],
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                  ),
+                                ),
                           SizedBox(height: 20),
                           Text(
                             'Número de Identificación Personal',
@@ -409,7 +421,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                     ),
                                   ),
                                   SizedBox(height: 8),
-                                  Text('CUIT: 30709035262'),
+                                  Text('CUIT: ${selectedContractorCuit ?? 'No disponible'}'),
                                   Text('Tipo persona: Persona Jurídica'),
                                   Text('Tipo trabajador: Empleados en Relación de Dependencia'),
                                   Text('Actividades: -'),
