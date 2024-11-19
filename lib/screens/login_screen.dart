@@ -107,7 +107,7 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => HomeScreen(bearerToken: bearerToken, empresas: empresas),
+            builder: (context) => HomeScreen(bearerToken: bearerToken, empresas: empresas, username: _usernameController.text,),
           ),
         );
       } else {

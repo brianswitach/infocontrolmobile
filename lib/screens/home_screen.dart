@@ -8,8 +8,13 @@ import './lupa_empresa.dart';
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
   final List<Map<String, dynamic>> empresas;
+  final String username;
 
-  HomeScreen({required this.bearerToken, required this.empresas});
+  HomeScreen({
+    required this.bearerToken, 
+    required this.empresas,
+    required this.username,
+  });
 
   @override
   _HomeScreenState createState() => _HomeScreenState();
@@ -94,42 +99,37 @@ class _HomeScreenState extends State<HomeScreen> {
           backgroundColor: Colors.white,
           elevation: 0,
           title: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Spacer(),
               IconButton(
                 icon: Icon(Icons.notifications, color: Color(0xFF2a3666)),
                 onPressed: () {},
+                constraints: BoxConstraints(),
+                padding: EdgeInsets.symmetric(horizontal: 8),
               ),
               IconButton(
                 icon: Icon(Icons.message, color: Color(0xFF2a3666)),
                 onPressed: () {},
+                constraints: BoxConstraints(),
+                padding: EdgeInsets.symmetric(horizontal: 8),
               ),
               IconButton(
                 icon: Icon(Icons.settings, color: Color(0xFF2a3666)),
                 onPressed: () {},
+                constraints: BoxConstraints(),
+                padding: EdgeInsets.symmetric(horizontal: 8),
               ),
               IconButton(
                 icon: Icon(Icons.people, color: Color(0xFF2a3666)),
                 onPressed: () {},
+                constraints: BoxConstraints(),
+                padding: EdgeInsets.symmetric(horizontal: 8),
               ),
               IconButton(
                 icon: Icon(Icons.info, color: Color(0xFF2a3666)),
                 onPressed: () {},
-              ),
-              Container(
-                height: 24,
-                width: 1,
-                color: Colors.grey[300],
-                margin: EdgeInsets.symmetric(horizontal: 10),
-              ),
-              CircleAvatar(
-                backgroundColor: Color(0xFF2a3666),
-                radius: 15,
-              ),
-              SizedBox(width: 5),
-              Icon(
-                Icons.arrow_drop_down,
-                color: Color(0xFF2a3666),
+                constraints: BoxConstraints(),
+                padding: EdgeInsets.symmetric(horizontal: 8),
               ),
             ],
           ),
@@ -155,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     SizedBox(height: 25),
                     Center(
                       child: Text(
-                        'Switach, Brian',
+                        widget.username,
                         style: TextStyle(
                           fontFamily: 'Montserrat',
                           fontSize: 20,
