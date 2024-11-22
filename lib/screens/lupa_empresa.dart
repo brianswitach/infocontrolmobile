@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
   final String bearerToken;
   final String idEmpresaAsociada;
+  final String empresaId;
 
   LupaEmpresaScreen({
     required this.empresa,
     required this.bearerToken,
     required this.idEmpresaAsociada,
+    required this.empresaId,
   });
 
   @override
@@ -39,11 +42,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       print('Bearer Token: ${widget.bearerToken}');
       print('ID Empresa Asociada: ${widget.idEmpresaAsociada}');
 
+      final url = Uri.parse(
+        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar',
+      ).replace(queryParameters: {
+        'id_empresas': widget.idEmpresaAsociada,
+      });
+
       final response = await http.get(
-        Uri.parse('https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar')
-            .replace(queryParameters: {
-          'id_empresas': widget.idEmpresaAsociada,
-        }),
+        url,
         headers: {
           'Authorization': 'Bearer ${widget.bearerToken}',
           'Content-Type': 'application/json',
@@ -57,20 +63,24 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
         print('Response completa: $responseData');
-        
+
         setState(() {
           empleados = responseData['data'] ?? [];
           isLoading = false;
         });
+
+        // Guardar empleados en Hive
+        await HiveHelper.insertEmpleados(widget.empresaId, empleados);
       } else {
         print('Error al obtener empleados: ${response.statusCode}');
         setState(() {
           isLoading = false;
         });
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al obtener empleados: ${response.statusCode}'),
+            content:
+                Text('Error al obtener empleados: ${response.statusCode}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -80,7 +90,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       setState(() {
         isLoading = false;
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error en la solicitud: $e'),
@@ -98,9 +108,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
     setState(() {
       selectedContractor = nombreRazonSocial;
-      selectedContractorCuit = empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
-      selectedContractorTipo = empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
-      selectedContractorMensajeGeneral = empleadoSeleccionado != null ? empleadoSeleccionado['mensaje_general'] : '';
+      selectedContractorCuit =
+          empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
+      selectedContractorTipo =
+          empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
+      selectedContractorMensajeGeneral = empleadoSeleccionado != null
+          ? empleadoSeleccionado['mensaje_general']
+          : '';
       showContractorInfo = true;
     });
   }
@@ -134,7 +148,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
               backgroundColor: Color(0xFF232e63),
               radius: 15,
               child: Text(
-                widget.empresa['nombre']?[0] ?? 'B',
+                widget.empresa['nombre']?[0] ?? 'E',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -237,21 +251,24 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               : DropdownButtonFormField<String>(
                                   isExpanded: true,
                                   items: empleados
-                                    .map((e) => e['nombre_razon_social']?.toString() ?? '')
-                                    .toSet()
-                                    .map<DropdownMenuItem<String>>((nombreRazonSocial) {
-                                      return DropdownMenuItem<String>(
-                                        value: nombreRazonSocial,
-                                        child: Text(
-                                          nombreRazonSocial,
-                                          style: TextStyle(
-                                            fontFamily: 'Montserrat',
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
+                                      .map((e) => e['nombre_razon_social']
+                                              ?.toString() ??
+                                          '')
+                                      .toSet()
+                                      .map<DropdownMenuItem<String>>(
+                                          (nombreRazonSocial) {
+                                    return DropdownMenuItem<String>(
+                                      value: nombreRazonSocial,
+                                      child: Text(
+                                        nombreRazonSocial,
+                                        style: TextStyle(
+                                          fontFamily: 'Montserrat',
                                         ),
-                                      );
-                                    }).toList(),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                      ),
+                                    );
+                                  }).toList(),
                                   value: selectedContractor,
                                   onChanged: (value) {
                                     if (value != null) {
@@ -259,7 +276,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                     }
                                   },
                                   decoration: InputDecoration(
-                                    contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                                    contentPadding: EdgeInsets.symmetric(
+                                        vertical: 10, horizontal: 15),
                                     hintText: 'Seleccione Contratista',
                                     hintStyle: TextStyle(
                                       fontFamily: 'Montserrat',
@@ -297,7 +315,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               Expanded(
                                 child: TextField(
                                   decoration: InputDecoration(
-                                    hintText: 'Número de Identificación Personal',
+                                    hintText:
+                                        'Número de Identificación Personal',
                                     hintStyle: TextStyle(
                                       fontFamily: 'Montserrat',
                                       color: Colors.grey,
@@ -400,14 +419,20 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   Container(
                                     padding: EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      color: selectedContractorMensajeGeneral?.toLowerCase().contains('inhabilitado') == true 
-                                          ? Colors.red[300] 
+                                      color: selectedContractorMensajeGeneral
+                                                  ?.toLowerCase()
+                                                  .contains('inhabilitado') ==
+                                              true
+                                          ? Colors.red[300]
                                           : Colors.green[300],
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Center(
                                       child: Text(
-                                        selectedContractorMensajeGeneral?.toLowerCase().contains('inhabilitado') == true
+                                        selectedContractorMensajeGeneral
+                                                    ?.toLowerCase()
+                                                    .contains('inhabilitado') ==
+                                                true
                                             ? 'CONTRATISTA INHABILITADO'
                                             : 'CONTRATISTA HABILITADO',
                                         style: TextStyle(
@@ -429,9 +454,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                     ),
                                   ),
                                   SizedBox(height: 8),
-                                  Text('CUIT: ${selectedContractorCuit ?? 'No disponible'}'),
+                                  Text(
+                                      'CUIT: ${selectedContractorCuit ?? 'No disponible'}'),
                                   Text('Tipo persona: -'),
-                                  Text('Tipo trabajador: ${selectedContractorTipo ?? 'No disponible'}'),
+                                  Text(
+                                      'Tipo trabajador: ${selectedContractorTipo ?? 'No disponible'}'),
                                   Text('Actividades: -'),
                                   SizedBox(height: 20),
                                   Row(
@@ -445,16 +472,20 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                           },
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.grey[200],
-                                            padding: EdgeInsets.symmetric(vertical: 12),
+                                            padding: EdgeInsets.symmetric(
+                                                vertical: 12),
                                           ),
                                           child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
                                             children: [
-                                              Icon(Icons.people, color: Colors.black54),
+                                              Icon(Icons.people,
+                                                  color: Colors.black54),
                                               SizedBox(width: 8),
                                               Text(
                                                 'Empleados',
-                                                style: TextStyle(color: Colors.black54),
+                                                style: TextStyle(
+                                                    color: Colors.black54),
                                               ),
                                             ],
                                           ),
@@ -466,16 +497,20 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                           onPressed: () {},
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.grey[200],
-                                            padding: EdgeInsets.symmetric(vertical: 12),
+                                            padding: EdgeInsets.symmetric(
+                                                vertical: 12),
                                           ),
                                           child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
                                             children: [
-                                              Icon(Icons.directions_car, color: Colors.black54),
+                                              Icon(Icons.directions_car,
+                                                  color: Colors.black54),
                                               SizedBox(width: 8),
                                               Text(
                                                 'Vehículos',
-                                                style: TextStyle(color: Colors.black54),
+                                                style: TextStyle(
+                                                    color: Colors.black54),
                                               ),
                                             ],
                                           ),
@@ -495,41 +530,59 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                       ),
                                     ),
                                     SizedBox(height: 10),
-                                    ...empleados.map((empleado) => Padding(
-                                      padding: const EdgeInsets.only(bottom: 8.0),
-                                      child: Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              '${empleado['documento']} - ${empleado['apellido_nombre']}',
-                                              style: TextStyle(
-                                                color: empleado['habilitado'] == true ? Colors.green : Colors.red[800],
+                                    ...empleados
+                                        .map((empleado) => Padding(
+                                              padding: const EdgeInsets.only(
+                                                  bottom: 8.0),
+                                              child: Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      '${empleado['documento']} - ${empleado['apellido_nombre']}',
+                                                      style: TextStyle(
+                                                        color: empleado[
+                                                                    'habilitado'] ==
+                                                                true
+                                                            ? Colors.green
+                                                            : Colors.red[800],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  SizedBox(width: 8),
+                                                  ElevatedButton(
+                                                    onPressed: () {},
+                                                    style:
+                                                        ElevatedButton.styleFrom(
+                                                      backgroundColor:
+                                                          Color(0xFF43b6ed),
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 8,
+                                                              vertical: 4),
+                                                      minimumSize: Size(60, 30),
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(Icons.arrow_forward,
+                                                            color: Colors.white,
+                                                            size: 16),
+                                                        SizedBox(width: 4),
+                                                        Text(
+                                                          'Entrar',
+                                                          style: TextStyle(
+                                                              color:
+                                                                  Colors.white,
+                                                              fontSize: 12),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ),
-                                          ),
-                                          SizedBox(width: 8),
-                                          ElevatedButton(
-                                            onPressed: () {},
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: Color(0xFF43b6ed),
-                                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              minimumSize: Size(60, 30),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(Icons.arrow_forward, color: Colors.white, size: 16),
-                                                SizedBox(width: 4),
-                                                Text(
-                                                  'Entrar',
-                                                  style: TextStyle(color: Colors.white, fontSize: 12),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    )).toList(),
+                                            ))
+                                        .toList(),
                                   ],
                                   SizedBox(height: 20),
                                   Center(
@@ -537,16 +590,19 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                       onPressed: () {},
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.grey[300],
-                                        padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 24, vertical: 12),
                                       ),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Icon(Icons.print, color: Colors.black54),
+                                          Icon(Icons.print,
+                                              color: Colors.black54),
                                           SizedBox(width: 8),
                                           Text(
                                             'Imprimir',
-                                            style: TextStyle(color: Colors.black54),
+                                            style: TextStyle(
+                                                color: Colors.black54),
                                           ),
                                         ],
                                       ),

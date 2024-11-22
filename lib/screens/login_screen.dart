@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'home_screen.dart';
+import './home_screen.dart';
 import 'package:http/http.dart' as http;
-import 'dart:io';  // Aquí agregamos la importación necesaria
+import 'dart:io';
+import './hive_helper.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -10,16 +12,28 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _usernameController = TextEditingController(text: "API.30511190238");
-  final TextEditingController _passwordController = TextEditingController(text: "Inf0C0ntr0l2023");
+  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
   String bearerToken = "";
   String _language = 'es';
   bool _showPendingMessages = false;
-  List<Map<String, dynamic>> empresas = [];  // Cambio de tipo aquí
-
-  // Agregar variables para el nombre y el ID de la empresa
+  List<Map<String, dynamic>> empresas = [];
   String? empresaNombre;
   String? empresaId;
+
+  @override
+  void initState() {
+    super.initState();
+    _usernameController.text = 'API.30511190238';
+    _passwordController.text = 'Inf0C0ntr0l2023';
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   void _changeLanguage(String language) {
     setState(() {
@@ -86,6 +100,37 @@ class _LoginScreenState extends State<LoginScreen> {
     String basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
 
     try {
+      var connectivityResult = await Connectivity().checkConnectivity();
+      if (connectivityResult == ConnectivityResult.none) {
+        // Sin conexión, intentar cargar datos locales
+        List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
+
+        if (localEmpresas.isNotEmpty) {
+          // Si hay datos locales, continuar a HomeScreen
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => HomeScreen(
+                bearerToken: bearerToken,
+                empresas: localEmpresas,
+                username: username,
+                password: password,
+              ),
+            ),
+          );
+        } else {
+          // No hay datos locales y no hay conexión
+          print('No hay conexión y no hay datos locales disponibles.');
+          // Mostrar mensaje al usuario
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('No hay conexión y no hay datos locales disponibles.'),
+            ),
+          );
+        }
+        return;
+      }
+
       final loginResponse = await http.post(
         Uri.parse(loginUrl),
         headers: {
@@ -102,19 +147,35 @@ class _LoginScreenState extends State<LoginScreen> {
         });
 
         await sendRequest();
-        
-        // Ahora simplemente navegar a la siguiente pantalla sin mostrar el cartel
+
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => HomeScreen(bearerToken: bearerToken, empresas: empresas, username: _usernameController.text,),
+            builder: (context) => HomeScreen(
+              bearerToken: bearerToken,
+              empresas: empresas,
+              username: username,
+              password: password,
+            ),
           ),
         );
       } else {
         // Manejar error de login si es necesario
+        print('Error en login: ${loginResponse.statusCode}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error en login: ${loginResponse.statusCode}'),
+          ),
+        );
       }
     } catch (e) {
       // Manejar error de conexión si es necesario
+      print('Error de conexión en login: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error de conexión en login'),
+        ),
+      );
     }
   }
 
@@ -133,7 +194,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
         empresas = List<Map<String, dynamic>>.from(responseData['data']);
-        
+
+        // Guardar en Hive
+        await HiveHelper.insertEmpresas(empresas);
+
         // Guardamos el nombre y el ID de la primera empresa en la lista
         setState(() {
           empresaNombre = empresas[0]['nombre'];
@@ -141,9 +205,11 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       } else {
         // Manejar error de solicitud si es necesario
+        print('Error en sendRequest: ${response.statusCode}');
       }
     } catch (e) {
       // Manejar error de conexión si es necesario
+      print('Error de conexión en sendRequest: $e');
     }
   }
 
@@ -236,12 +302,15 @@ class _LoginScreenState extends State<LoginScreen> {
                               filled: true,
                               fillColor: Colors.grey[200],
                               labelText: getText('userField'),
-                              labelStyle: TextStyle(fontFamily: 'Montserrat', color: Colors.black54),
+                              labelStyle: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  color: Colors.black54),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide.none,
                               ),
-                              prefixIcon: Icon(Icons.person, color: Colors.black54),
+                              prefixIcon:
+                                  Icon(Icons.person, color: Colors.black54),
                             ),
                           ),
                           SizedBox(height: 16),
@@ -251,12 +320,15 @@ class _LoginScreenState extends State<LoginScreen> {
                               filled: true,
                               fillColor: Colors.grey[200],
                               labelText: getText('passwordField'),
-                              labelStyle: TextStyle(fontFamily: 'Montserrat', color: Colors.black54),
+                              labelStyle: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  color: Colors.black54),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide.none,
                               ),
-                              prefixIcon: Icon(Icons.lock, color: Colors.black54),
+                              prefixIcon:
+                                  Icon(Icons.lock, color: Colors.black54),
                             ),
                             obscureText: true,
                           ),
@@ -272,7 +344,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                 },
                               ),
                               SizedBox(width: 8),
-                              Text(getText('rememberData'), style: TextStyle(fontFamily: 'Montserrat', color: Colors.black54)),
+                              Text(getText('rememberData'),
+                                  style: TextStyle(
+                                      fontFamily: 'Montserrat',
+                                      color: Colors.black54)),
                             ],
                           ),
                           Align(
@@ -292,7 +367,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           ElevatedButton(
                             onPressed: () => login(context),
                             style: ElevatedButton.styleFrom(
-                              padding: EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 40, vertical: 12),
                               backgroundColor: Colors.blue,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),

@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import './lupa_empresa.dart';
+import 'hive_helper.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class EmpresaScreen extends StatefulWidget {
-  final Map<String, dynamic> empresa;
-  final List<String> instalaciones;
+  final String empresaId;
+  final String bearerToken;
+  final Map<String, dynamic> empresaData;
 
   EmpresaScreen({
-    required this.empresa,
-    required this.instalaciones,
+    required this.empresaId,
+    required this.bearerToken,
+    required this.empresaData,
   });
 
   @override
@@ -15,10 +19,38 @@ class EmpresaScreen extends StatefulWidget {
 }
 
 class _EmpresaScreenState extends State<EmpresaScreen> {
+  List<Map<String, dynamic>> instalaciones = [];
+  String empresaNombre = '';
+  String empresaInicial = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEmpresaData();
+  }
+
+  Future<void> _loadEmpresaData() async {
+    // Obtener los datos de la empresa desde widget.empresaData
+    Map<String, dynamic> empresaData = widget.empresaData;
+
+    if (empresaData.isNotEmpty) {
+      setState(() {
+        empresaNombre = empresaData['nombre'] ?? 'Nombre de la empresa';
+        empresaInicial = empresaNombre.isNotEmpty ? empresaNombre[0] : 'E';
+      });
+    }
+
+    // Obtener instalaciones desde Hive
+    List<Map<String, dynamic>> instalacionesData =
+        HiveHelper.getInstalaciones(widget.empresaId);
+
+    setState(() {
+      instalaciones = instalacionesData;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    List<String> instalaciones = widget.instalaciones;
-
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
@@ -34,9 +66,10 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (context) => LupaEmpresaScreen(
-                      empresa: widget.empresa,
-                      bearerToken: widget.empresa['bearerToken'] ?? '',
-                      idEmpresaAsociada: widget.empresa['id_empresa_asociada'] ?? '',
+                      empresaId: widget.empresaId,
+                      bearerToken: widget.bearerToken,
+                      idEmpresaAsociada: widget.empresaId,
+                      empresa: widget.empresaData,
                     ),
                   ),
                 );
@@ -52,7 +85,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               backgroundColor: Color(0xFF232e63),
               radius: 15,
               child: Text(
-                widget.empresa['nombre']?[0] ?? 'B',
+                empresaInicial,
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -91,7 +124,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                       backgroundColor: Colors.blueAccent,
                       radius: 30,
                       child: Text(
-                        widget.empresa['nombre']?[0] ?? 'B',
+                        empresaInicial,
                         style: TextStyle(
                           fontFamily: 'Montserrat',
                           fontSize: 24,
@@ -103,7 +136,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     SizedBox(height: 15),
                     Center(
                       child: Text(
-                        'Switach, Brian',
+                        empresaNombre,
                         style: TextStyle(
                           fontFamily: 'Montserrat',
                           fontSize: 20,
@@ -137,6 +170,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                 ),
               ),
               SizedBox(height: 30),
+              // Puedes añadir más elementos al drawer aquí
             ],
           ),
         ),
@@ -170,7 +204,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
             Row(
               children: [
                 Text(
-                  widget.empresa['nombre'] ?? 'Nombre de la empresa',
+                  empresaNombre,
                   style: TextStyle(
                     fontFamily: 'Montserrat',
                     fontSize: 20,
@@ -199,7 +233,8 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            instalaciones[index],
+                            instalaciones[index]['nombre'] ??
+                                'Nombre de la instalación',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
                               fontSize: 14,

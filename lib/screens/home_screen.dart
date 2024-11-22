@@ -2,18 +2,22 @@ import 'package:flutter/material.dart';
 import './empresa_screen.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:io';
 import './lupa_empresa.dart';
+import 'dart:async';
+import 'hive_helper.dart'; // Importamos HiveHelper
+import 'package:connectivity_plus/connectivity_plus.dart'; // Para detectar conectividad
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
   final List<Map<String, dynamic>> empresas;
   final String username;
+  final String password;
 
   HomeScreen({
-    required this.bearerToken, 
+    required this.bearerToken,
     required this.empresas,
     required this.username,
+    required this.password,
   });
 
   @override
@@ -22,74 +26,199 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _showPendingMessages = false;
+  late String bearerToken;
+  Timer? _refreshTimer;
+  List<Map<String, dynamic>> empresas = [];
 
   @override
   void initState() {
     super.initState();
+    bearerToken = widget.bearerToken;
+    empresas = widget.empresas;
+    _startTokenRefreshTimer();
+
+    // Detección de conectividad
+    Connectivity().onConnectivityChanged.listen(
+      (ConnectivityResult result) {
+        if (result == ConnectivityResult.none) {
+          // Sin conexión, cargar datos locales
+          _loadLocalData();
+        } else {
+          // Con conexión, refrescar token y datos
+          _refreshBearerToken();
+        }
+      },
+    );
+
+    // Cargar datos iniciales
+    _loadLocalData();
   }
 
-  Future<void> getEmpresaDetails(String empresaId) async {
-    String url = "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId";
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startTokenRefreshTimer() {
+    _refreshTimer = Timer.periodic(
+      Duration(seconds: 290),
+      (_) {
+        _refreshBearerToken();
+      },
+    );
+  }
+
+  Future<void> _refreshBearerToken() async {
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // Sin conexión, no podemos refrescar el token
+      print('No hay conexión. No se puede refrescar el token.');
+      return;
+    }
 
     try {
-      final response = await http.get(
-        Uri.parse(url),
+      String loginUrl =
+          "https://www.infocontrol.com.ar/desarrollo_v2/api/web/workers/login";
+      String basicAuth = 'Basic ' +
+          base64Encode(utf8.encode('${widget.username}:${widget.password}'));
+
+      final response = await http.post(
+        Uri.parse(loginUrl),
         headers: {
-          HttpHeaders.contentTypeHeader: "application/json",
-          HttpHeaders.authorizationHeader: "Bearer ${widget.bearerToken}",
-          'auth-type': 'no-auth',
+          'Content-Type': 'application/json',
+          'Authorization': basicAuth,
         },
       );
 
       if (response.statusCode == 200) {
-        var responseData = jsonDecode(response.body);
+        final loginData = jsonDecode(response.body);
+        String newToken = loginData['data']['Bearer'];
+        setState(() {
+          bearerToken = newToken;
+        });
+        print('Token actualizado');
 
-        List<String> nombresInstalaciones = [];
-        if (responseData['data']['instalaciones'] != null) {
-          for (var instalacion in responseData['data']['instalaciones']) {
-            nombresInstalaciones.add(instalacion['nombre'].toString());
-          }
-        }
+        // Actualizar datos desde el servidor
+        await _updateDataFromServer();
+      } else {
+        print('Error al actualizar el token: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error al refrescar el token: $e');
+    }
+  }
 
-        final empresaData = Map<String, dynamic>.from(
-          widget.empresas.firstWhere(
-            (empresa) => empresa['id_empresa_asociada'] == empresaId,
+  Future<void> _loadLocalData() async {
+    List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
+
+    setState(() {
+      empresas = localEmpresas;
+    });
+  }
+
+  Future<void> _updateDataFromServer() async {
+    String listarUrl =
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/listar";
+
+    try {
+      final response = await http.get(
+        Uri.parse(listarUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $bearerToken',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        List<Map<String, dynamic>> empresasData =
+            List<Map<String, dynamic>>.from(responseData['data']);
+
+        // Guardar en Hive
+        await HiveHelper.insertEmpresas(empresasData);
+
+        setState(() {
+          empresas = empresasData;
+        });
+      } else {
+        print('Error al obtener empresas: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error de conexión al actualizar datos: $e');
+    }
+  }
+
+  Future<void> getEmpresaDetails(
+      String empresaId, Map<String, dynamic> empresaData) async {
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // Sin conexión, navegar a EmpresaScreen que cargará datos locales
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => EmpresaScreen(
+            empresaId: empresaId,
+            bearerToken: bearerToken,
+            empresaData: empresaData,
           ),
+        ),
+      );
+    } else {
+      // Con conexión, realizar la solicitud HTTP y guardar instalaciones en Hive
+      String url =
+          "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/"
+          "empresasinstalaciones?id_empresas=$empresaId";
+
+      try {
+        final response = await http.get(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $bearerToken',
+            'auth-type': 'no-auth',
+          },
         );
-        empresaData['bearerToken'] = widget.bearerToken;
 
-        if (!mounted) return;
+        if (response.statusCode == 200) {
+          var responseData = jsonDecode(response.body);
 
-        if (nombresInstalaciones.isNotEmpty) {
+          List<Map<String, dynamic>> instalaciones = [];
+          if (responseData['data']['instalaciones'] != null) {
+            for (var instalacion in responseData['data']['instalaciones']) {
+              instalaciones.add({
+                'id_instalacion': instalacion['id_instalacion'],
+                'nombre': instalacion['nombre'],
+                // Añade otros campos si es necesario
+              });
+            }
+          }
+
+          // Guardar instalaciones en Hive
+          await HiveHelper.insertInstalaciones(empresaId, instalaciones);
+
+          if (!mounted) return;
+
           Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => EmpresaScreen(
-                empresa: empresaData,
-                instalaciones: nombresInstalaciones,
+                empresaId: empresaId,
+                bearerToken: bearerToken,
+                empresaData: empresaData,
               ),
             ),
           );
         } else {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => LupaEmpresaScreen(
-                empresa: empresaData,
-                bearerToken: widget.bearerToken,
-                idEmpresaAsociada: empresaId,
-              ),
-            ),
-          );
+          print('Error al obtener detalles de la empresa: '
+              '${response.statusCode}');
         }
-      } else {
-        print('Error al obtener detalles de la empresa: ${response.statusCode}');
+      } catch (e) {
+        print('Error de conexión: $e');
       }
-    } catch (e) {
-      print('Error de conexión: $e');
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -176,7 +305,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    padding:
+                        EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   ),
                   child: Text(
                     'Seleccionar empresa',
@@ -290,10 +420,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               SizedBox(height: 20),
-              for (var empresa in widget.empresas)
+              for (var empresa in empresas)
                 GestureDetector(
                   onTap: () {
-                    getEmpresaDetails(empresa['id_empresa_asociada']);
+                    getEmpresaDetails(
+                        empresa['id_empresa_asociada'], empresa);
                   },
                   child: Container(
                     margin: EdgeInsets.only(bottom: 12),
@@ -308,7 +439,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         CircleAvatar(
                           backgroundColor: Color(0xFF2a3666),
                           radius: 15,
-                          backgroundImage: AssetImage('assets/company_logo.png'),
+                          backgroundImage:
+                              AssetImage('assets/company_logo.png'),
                         ),
                         SizedBox(width: 10),
                         Expanded(
@@ -353,10 +485,20 @@ class _HomeScreenState extends State<HomeScreen> {
               for (int i = 0; i < 5; i++)
                 Container(
                   margin: EdgeInsets.only(bottom: 12),
-                  height: 50,
+                  padding: EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'Próximamente',
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        color: Colors.grey,
+                      ),
+                    ),
                   ),
                 ),
             ],
