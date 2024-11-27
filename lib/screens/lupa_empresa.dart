@@ -41,7 +41,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   Future<void> obtenerEmpleados() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      // Sin conexión, cargar empleados desde Hive
       List<dynamic>? empleadosLocales =
           HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales != null && empleadosLocales.isNotEmpty) {
@@ -50,7 +49,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           isLoading = false;
         });
       } else {
-        // No hay datos locales disponibles
         setState(() {
           isLoading = false;
         });
@@ -63,13 +61,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         );
       }
     } else {
-      // Con conexión, realizar solicitud HTTP y guardar empleados en Hive
       try {
         print('Bearer Token: ${widget.bearerToken}');
         print('ID Empresa Asociada: ${widget.idEmpresaAsociada}');
 
         final url = Uri.parse(
-          'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listar',
+          'https://www.infocontrol.tech/web/api/mobile/empleados/listar',
         ).replace(queryParameters: {
           'id_empresas': widget.idEmpresaAsociada,
         });
@@ -80,12 +77,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
             'Authorization': 'Bearer ${widget.bearerToken}',
             'Content-Type': 'application/json',
             'Accept': 'application/json',
+            'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
           },
         );
 
         print('Response headers: ${response.headers}');
         print('Response body raw: ${response.body}');
-
         if (response.statusCode == 200) {
           final responseData = jsonDecode(response.body);
           print('Response completa: $responseData');
@@ -95,7 +92,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
             isLoading = false;
           });
 
-          // Guardar empleados en Hive
           await HiveHelper.insertEmpleados(widget.empresaId, empleados);
         } else {
           print('Error al obtener empleados: ${response.statusCode}');

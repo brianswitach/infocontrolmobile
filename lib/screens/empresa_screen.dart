@@ -22,6 +22,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
   List<Map<String, dynamic>> instalaciones = [];
   String empresaNombre = '';
   String empresaInicial = '';
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -36,7 +37,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
     if (empresaData.isNotEmpty) {
       setState(() {
         empresaNombre = empresaData['nombre'] ?? 'Nombre de la empresa';
-        empresaInicial = empresaNombre.isNotEmpty ? empresaNombre[0] : 'E';
+        empresaInicial = empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
       });
     }
 
@@ -46,6 +47,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
 
     setState(() {
       instalaciones = instalacionesData;
+      _isLoading = false;
     });
   }
 
@@ -170,7 +172,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                 ),
               ),
               SizedBox(height: 30),
-              // Puedes añadir más elementos al drawer aquí
             ],
           ),
         ),
@@ -221,39 +222,41 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
             ),
             SizedBox(height: 30),
             Expanded(
-              child: instalaciones.isNotEmpty
-                  ? ListView.builder(
-                      itemCount: instalaciones.length,
-                      itemBuilder: (context, index) {
-                        return Container(
-                          margin: EdgeInsets.only(bottom: 12),
-                          padding: EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+              child: _isLoading
+                  ? Center(child: CircularProgressIndicator())
+                  : instalaciones.isNotEmpty
+                      ? ListView.builder(
+                          itemCount: instalaciones.length,
+                          itemBuilder: (context, index) {
+                            return Container(
+                              margin: EdgeInsets.only(bottom: 12),
+                              padding: EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                instalaciones[index]['nombre'] ??
+                                    'Nombre de la instalación',
+                                style: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  fontSize: 14,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            );
+                          },
+                        )
+                      : Center(
                           child: Text(
-                            instalaciones[index]['nombre'] ??
-                                'Nombre de la instalación',
+                            'No hay instalaciones disponibles.',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
-                              fontSize: 14,
+                              fontSize: 16,
                               color: Colors.black,
                             ),
                           ),
-                        );
-                      },
-                    )
-                  : Center(
-                      child: Text(
-                        'No hay instalaciones disponibles.',
-                        style: TextStyle(
-                          fontFamily: 'Montserrat',
-                          fontSize: 16,
-                          color: Colors.black,
                         ),
-                      ),
-                    ),
             ),
           ],
         ),

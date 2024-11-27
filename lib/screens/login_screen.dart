@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'dart:io';
 import './hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -20,19 +21,28 @@ class _LoginScreenState extends State<LoginScreen> {
   List<Map<String, dynamic>> empresas = [];
   String? empresaNombre;
   String? empresaId;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _usernameController.text = 'API.30511190238';
-    _passwordController.text = 'Inf0C0ntr0l2023';
+    _usernameController.text = 'api.mobile';
+    _passwordController.text = 'ApiInfoC24';
   }
 
   @override
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _launchURL() async {
+    final Uri url = Uri.parse('https://www.infocontrolweb.com/inteligencia_artificial');
+    if (!await launchUrl(url)) {
+      throw Exception('Could not launch $url');
+    }
   }
 
   void _changeLanguage(String language) {
@@ -94,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> login(BuildContext context) async {
-    String loginUrl = "https://www.infocontrol.com.ar/desarrollo_v2/api/web/workers/login";
+    String loginUrl = "https://www.infocontrol.tech/web/api/web/workers/login";
     String username = _usernameController.text;
     String password = _passwordController.text;
     String basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
@@ -102,11 +112,9 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       var connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
-        // Sin conexión, intentar cargar datos locales
         List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
 
         if (localEmpresas.isNotEmpty) {
-          // Si hay datos locales, continuar a HomeScreen
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -119,9 +127,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else {
-          // No hay datos locales y no hay conexión
           print('No hay conexión y no hay datos locales disponibles.');
-          // Mostrar mensaje al usuario
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('No hay conexión y no hay datos locales disponibles.'),
@@ -131,13 +137,48 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
+      print('Realizando solicitud de login a: $loginUrl');
+      print('Headers de la solicitud:');
+      print({
+        'Content-Type': 'application/json',
+        'Authorization': basicAuth,
+        'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
+      });
+      print('Cuerpo de la solicitud:');
+      print(jsonEncode({
+        'username': username,
+        'password': password,
+      }));
+
       final loginResponse = await http.post(
         Uri.parse(loginUrl),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': basicAuth,
+          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
         },
+        body: jsonEncode({
+          'username': username,
+          'password': password,
+        }),
       );
+
+      print('\nRespuesta del servidor:');
+      print('Código de estado: ${loginResponse.statusCode}');
+      print('Headers de respuesta:');
+      loginResponse.headers.forEach((key, value) {
+        print('$key: $value');
+      });
+      print('\nCuerpo de la respuesta:');
+      print(loginResponse.body);
+      
+      try {
+        print('\nRespuesta JSON parseada:');
+        final parsedJson = jsonDecode(loginResponse.body);
+        print(JsonEncoder.withIndent('  ').convert(parsedJson));
+      } catch (e) {
+        print('\nError al parsear JSON: $e');
+      }
 
       if (loginResponse.statusCode == 200) {
         final loginData = jsonDecode(loginResponse.body);
@@ -145,6 +186,8 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() {
           _showPendingMessages = true;
         });
+
+        print('\nToken obtenido: $bearerToken');
 
         await sendRequest();
 
@@ -160,7 +203,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       } else {
-        // Manejar error de login si es necesario
         print('Error en login: ${loginResponse.statusCode}');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -169,7 +211,6 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } catch (e) {
-      // Manejar error de conexión si es necesario
       print('Error de conexión en login: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -180,35 +221,60 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> sendRequest() async {
-    String listarUrl = "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/listar";
+    String listarUrl = "https://www.infocontrol.tech/web/api/mobile/empresas/listar";
 
     try {
+      print('\nRealizando solicitud de empresas a: $listarUrl');
+      print('Headers de la solicitud:');
+      print({
+        HttpHeaders.contentTypeHeader: "application/json",
+        HttpHeaders.authorizationHeader: "Bearer $bearerToken",
+        'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
+      });
+
       final response = await http.get(
         Uri.parse(listarUrl),
         headers: {
           HttpHeaders.contentTypeHeader: "application/json",
           HttpHeaders.authorizationHeader: "Bearer $bearerToken",
+          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
         },
       );
+
+      print('\nRespuesta del servidor (listar empresas):');
+      print('Código de estado: ${response.statusCode}');
+      print('Headers de respuesta:');
+      response.headers.forEach((key, value) {
+        print('$key: $value');
+      });
+      print('\nCuerpo de la respuesta:');
+      print(response.body);
+      
+      try {
+        print('\nRespuesta JSON parseada:');
+        final parsedJson = jsonDecode(response.body);
+        print(JsonEncoder.withIndent('  ').convert(parsedJson));
+      } catch (e) {
+        print('\nError al parsear JSON: $e');
+      }
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
         empresas = List<Map<String, dynamic>>.from(responseData['data']);
 
-        // Guardar en Hive
         await HiveHelper.insertEmpresas(empresas);
 
-        // Guardamos el nombre y el ID de la primera empresa en la lista
         setState(() {
           empresaNombre = empresas[0]['nombre'];
           empresaId = empresas[0]['id_empresa_asociada'];
         });
+
+        print('\nEmpresas obtenidas:');
+        print(JsonEncoder.withIndent('  ').convert(empresas));
       } else {
-        // Manejar error de solicitud si es necesario
         print('Error en sendRequest: ${response.statusCode}');
       }
     } catch (e) {
-      // Manejar error de conexión si es necesario
       print('Error de conexión en sendRequest: $e');
     }
   }
@@ -216,211 +282,227 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            physics: constraints.maxHeight < 600
-                ? AlwaysScrollableScrollPhysics()
-                : NeverScrollableScrollPhysics(),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: constraints.maxHeight,
+      body: SingleChildScrollView(
+        controller: _scrollController,
+        child: Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            image: DecorationImage(
+              image: AssetImage("assets/background.png"),
+              fit: BoxFit.cover,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 40, right: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    IconButton(
+                      icon: Image.asset('assets/flag_arg.png'),
+                      iconSize: 40,
+                      onPressed: () => _changeLanguage('es'),
+                    ),
+                    IconButton(
+                      icon: Image.asset('assets/flag_us.png'),
+                      iconSize: 40,
+                      onPressed: () => _changeLanguage('en'),
+                    ),
+                    IconButton(
+                      icon: Image.asset('assets/flag_br.png'),
+                      iconSize: 40,
+                      onPressed: () => _changeLanguage('pt'),
+                    ),
+                  ],
+                ),
               ),
-              child: Container(
-                width: double.infinity,
+              Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: Image.asset(
+                  'assets/infocontrol_logo.png',
+                  width: 165,
+                ),
+              ),
+              Container(
+                width: MediaQuery.of(context).size.width * 0.85,
+                padding: EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  image: DecorationImage(
-                    image: AssetImage("assets/background.png"),
-                    fit: BoxFit.cover,
-                  ),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 40, right: 20),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          IconButton(
-                            icon: Image.asset('assets/flag_arg.png'),
-                            iconSize: 40,
-                            onPressed: () => _changeLanguage('es'),
-                          ),
-                          IconButton(
-                            icon: Image.asset('assets/flag_us.png'),
-                            iconSize: 40,
-                            onPressed: () => _changeLanguage('en'),
-                          ),
-                          IconButton(
-                            icon: Image.asset('assets/flag_br.png'),
-                            iconSize: 40,
-                            onPressed: () => _changeLanguage('pt'),
-                          ),
-                        ],
+                    Text(
+                      getText('login'),
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 24,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black,
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 20),
-                      child: Image.asset(
-                        'assets/infocontrol_logo.png',
-                        width: 165,
+                    SizedBox(height: 8),
+                    Text(
+                      getText('subtitle'),
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 16,
+                        color: Colors.black54,
                       ),
                     ),
-                    Container(
-                      width: MediaQuery.of(context).size.width * 0.85,
-                      padding: EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _usernameController,
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: Colors.grey[200],
+                        labelText: getText('userField'),
+                        labelStyle: TextStyle(
+                            fontFamily: 'Montserrat',
+                            color: Colors.black54),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        prefixIcon:
+                            Icon(Icons.person, color: Colors.black54),
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            getText('login'),
+                    ),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _passwordController,
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: Colors.grey[200],
+                        labelText: getText('passwordField'),
+                        labelStyle: TextStyle(
+                            fontFamily: 'Montserrat',
+                            color: Colors.black54),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        prefixIcon:
+                            Icon(Icons.lock, color: Colors.black54),
+                      ),
+                      obscureText: true,
+                    ),
+                    SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: _showPendingMessages,
+                          onChanged: (bool? value) {
+                            setState(() {
+                              _showPendingMessages = value ?? false;
+                            });
+                          },
+                        ),
+                        SizedBox(width: 8),
+                        Text(getText('rememberData'),
                             style: TextStyle(
-                              fontFamily: 'Montserrat',
-                              fontSize: 24,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            getText('subtitle'),
-                            style: TextStyle(
-                              fontFamily: 'Montserrat',
-                              fontSize: 16,
-                              color: Colors.black54,
-                            ),
-                          ),
-                          SizedBox(height: 16),
-                          TextField(
-                            controller: _usernameController,
-                            decoration: InputDecoration(
-                              filled: true,
-                              fillColor: Colors.grey[200],
-                              labelText: getText('userField'),
-                              labelStyle: TextStyle(
-                                  fontFamily: 'Montserrat',
-                                  color: Colors.black54),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide.none,
-                              ),
-                              prefixIcon:
-                                  Icon(Icons.person, color: Colors.black54),
-                            ),
-                          ),
-                          SizedBox(height: 16),
-                          TextField(
-                            controller: _passwordController,
-                            decoration: InputDecoration(
-                              filled: true,
-                              fillColor: Colors.grey[200],
-                              labelText: getText('passwordField'),
-                              labelStyle: TextStyle(
-                                  fontFamily: 'Montserrat',
-                                  color: Colors.black54),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide.none,
-                              ),
-                              prefixIcon:
-                                  Icon(Icons.lock, color: Colors.black54),
-                            ),
-                            obscureText: true,
-                          ),
-                          SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Checkbox(
-                                value: _showPendingMessages,
-                                onChanged: (bool? value) {
-                                  setState(() {
-                                    _showPendingMessages = value ?? false;
-                                  });
-                                },
-                              ),
-                              SizedBox(width: 8),
-                              Text(getText('rememberData'),
-                                  style: TextStyle(
-                                      fontFamily: 'Montserrat',
-                                      color: Colors.black54)),
-                            ],
-                          ),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: () {},
-                              child: Text(
-                                getText('forgotPassword'),
-                                style: TextStyle(
-                                  fontFamily: 'Montserrat',
-                                  color: Colors.blue,
-                                ),
-                              ),
-                            ),
-                          ),
-                          SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: () => login(context),
-                            style: ElevatedButton.styleFrom(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 40, vertical: 12),
-                              backgroundColor: Colors.blue,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: Text(
-                              getText('loginButton'),
-                              style: TextStyle(
                                 fontFamily: 'Montserrat',
-                                fontSize: 16,
-                                color: Colors.white,
-                              ),
+                                color: Colors.black54)),
+                      ],
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () {},
+                        child: Text(
+                          getText('forgotPassword'),
+                          style: TextStyle(
+                            fontFamily: 'Montserrat',
+                            color: Colors.blue, 
                             ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
-                    SizedBox(height: 20),
-                    Container(
-                      width: MediaQuery.of(context).size.width * 0.85,
-                      padding: EdgeInsets.all(20),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            getText('promoTitle'),
-                            style: TextStyle(
-                              fontFamily: 'Montserrat',
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            getText('promoSubtitle'),
-                            style: TextStyle(
-                              fontFamily: 'Montserrat',
-                              fontSize: 16,
-                              color: Colors.white70,
-                            ),
-                          ),
-                        ],
+                    SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () => login(context),
+                      style: ElevatedButton.styleFrom(
+                        padding: EdgeInsets.symmetric(
+                            horizontal: 40, vertical: 12),
+                        backgroundColor: Colors.blue,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        getText('loginButton'),
+                        style: TextStyle(
+                          fontFamily: 'Montserrat',
+                          fontSize: 16,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
-          );
-        },
+              SizedBox(height: 20),
+              Container(
+                width: MediaQuery.of(context).size.width * 0.85,
+                padding: EdgeInsets.all(20),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      getText('promoTitle'),
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      getText('promoSubtitle'),
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 16,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    Center(
+                      child: ElevatedButton(
+                        onPressed: _launchURL,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Color(0xFF3D77E9),
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: Text(
+                          getText('learnMore'),
+                          style: TextStyle(
+                            fontFamily: 'Montserrat',
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 40), // Espacio adicional al final para el scroll
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

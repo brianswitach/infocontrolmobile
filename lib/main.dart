@@ -17,6 +17,7 @@ class InfocontrolApp extends StatelessWidget {
     return MaterialApp(
       title: 'Infocontrol',
       home: LoginScreen(),
+      debugShowCheckedModeBanner: false
     );
   }
 }

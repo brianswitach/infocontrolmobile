@@ -4,8 +4,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import './lupa_empresa.dart';
 import 'dart:async';
-import 'hive_helper.dart'; // Importamos HiveHelper
-import 'package:connectivity_plus/connectivity_plus.dart'; // Para detectar conectividad
+import 'hive_helper.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
@@ -29,6 +29,8 @@ class _HomeScreenState extends State<HomeScreen> {
   late String bearerToken;
   Timer? _refreshTimer;
   List<Map<String, dynamic>> empresas = [];
+  List<Map<String, dynamic>> grupos = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -36,22 +38,28 @@ class _HomeScreenState extends State<HomeScreen> {
     bearerToken = widget.bearerToken;
     empresas = widget.empresas;
     _startTokenRefreshTimer();
+    _initializeData();
 
-    // Detección de conectividad
     Connectivity().onConnectivityChanged.listen(
       (ConnectivityResult result) {
         if (result == ConnectivityResult.none) {
-          // Sin conexión, cargar datos locales
           _loadLocalData();
         } else {
-          // Con conexión, refrescar token y datos
           _refreshBearerToken();
         }
       },
     );
+  }
 
-    // Cargar datos iniciales
-    _loadLocalData();
+  Future<void> _initializeData() async {
+    await _loadLocalData();
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult != ConnectivityResult.none) {
+      await _updateDataFromServer();
+    }
+    setState(() {
+      _isLoading = false;
+    });
   }
 
   @override
@@ -72,14 +80,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _refreshBearerToken() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      // Sin conexión, no podemos refrescar el token
       print('No hay conexión. No se puede refrescar el token.');
       return;
     }
 
     try {
-      String loginUrl =
-          "https://www.infocontrol.com.ar/desarrollo_v2/api/web/workers/login";
+      String loginUrl = "https://www.infocontrol.tech/web/api/web/workers/login";
       String basicAuth = 'Basic ' +
           base64Encode(utf8.encode('${widget.username}:${widget.password}'));
 
@@ -88,7 +94,12 @@ class _HomeScreenState extends State<HomeScreen> {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': basicAuth,
+          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
         },
+        body: jsonEncode({
+          'username': widget.username,
+          'password': widget.password,
+        }),
       );
 
       if (response.statusCode == 200) {
@@ -99,7 +110,6 @@ class _HomeScreenState extends State<HomeScreen> {
         });
         print('Token actualizado');
 
-        // Actualizar datos desde el servidor
         await _updateDataFromServer();
       } else {
         print('Error al actualizar el token: ${response.statusCode}');
@@ -111,15 +121,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadLocalData() async {
     List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
-
+    List<Map<String, dynamic>> localGrupos = HiveHelper.getGrupos();
+    
     setState(() {
       empresas = localEmpresas;
+      grupos = localGrupos;
     });
   }
 
   Future<void> _updateDataFromServer() async {
-    String listarUrl =
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/listar";
+    String listarUrl = "https://www.infocontrol.tech/web/api/mobile/empresas/listar";
 
     try {
       final response = await http.get(
@@ -127,6 +138,7 @@ class _HomeScreenState extends State<HomeScreen> {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $bearerToken',
+          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
         },
       );
 
@@ -135,11 +147,35 @@ class _HomeScreenState extends State<HomeScreen> {
         List<Map<String, dynamic>> empresasData =
             List<Map<String, dynamic>>.from(responseData['data']);
 
-        // Guardar en Hive
+        // Extraer grupos únicos
+        Set<String> gruposUnicos = {};
+        List<Map<String, dynamic>> gruposData = [];
+        
+        for (var empresa in empresasData) {
+          String? grupoNombre = empresa['grupo'];
+          String? grupoId = empresa['id_grupos'];
+          
+          if (grupoNombre != null && grupoId != null && !gruposUnicos.contains(grupoId)) {
+            gruposUnicos.add(grupoId);
+            gruposData.add({
+              'id': grupoId,
+              'nombre': grupoNombre,
+            });
+          }
+        }
+
         await HiveHelper.insertEmpresas(empresasData);
+        await HiveHelper.insertGrupos(gruposData);
+
+        // Descargar instalaciones para todas las empresas
+        for (var empresa in empresasData) {
+          String empresaId = empresa['id_empresa_asociada'];
+          await _fetchAndStoreInstalaciones(empresaId);
+        }
 
         setState(() {
           empresas = empresasData;
+          grupos = gruposData;
         });
       } else {
         print('Error al obtener empresas: ${response.statusCode}');
@@ -149,74 +185,53 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> getEmpresaDetails(
-      String empresaId, Map<String, dynamic> empresaData) async {
-    var connectivityResult = await Connectivity().checkConnectivity();
-    if (connectivityResult == ConnectivityResult.none) {
-      // Sin conexión, navegar a EmpresaScreen que cargará datos locales
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => EmpresaScreen(
-            empresaId: empresaId,
-            bearerToken: bearerToken,
-            empresaData: empresaData,
-          ),
-        ),
+  Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
+    String url = "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId";
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $bearerToken',
+          'auth-type': 'no-auth',
+          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
+        },
       );
-    } else {
-      // Con conexión, realizar la solicitud HTTP y guardar instalaciones en Hive
-      String url =
-          "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/"
-          "empresasinstalaciones?id_empresas=$empresaId";
 
-      try {
-        final response = await http.get(
-          Uri.parse(url),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $bearerToken',
-            'auth-type': 'no-auth',
-          },
-        );
-
-        if (response.statusCode == 200) {
-          var responseData = jsonDecode(response.body);
-
-          List<Map<String, dynamic>> instalaciones = [];
-          if (responseData['data']['instalaciones'] != null) {
-            for (var instalacion in responseData['data']['instalaciones']) {
-              instalaciones.add({
-                'id_instalacion': instalacion['id_instalacion'],
-                'nombre': instalacion['nombre'],
-                // Añade otros campos si es necesario
-              });
-            }
+      if (response.statusCode == 200) {
+        var responseData = jsonDecode(response.body);
+        List<Map<String, dynamic>> instalaciones = [];
+        
+        if (responseData['data']['instalaciones'] != null) {
+          for (var instalacion in responseData['data']['instalaciones']) {
+            instalaciones.add({
+              'id_instalacion': instalacion['id_instalacion'],
+              'nombre': instalacion['nombre'],
+            });
           }
-
-          // Guardar instalaciones en Hive
-          await HiveHelper.insertInstalaciones(empresaId, instalaciones);
-
-          if (!mounted) return;
-
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => EmpresaScreen(
-                empresaId: empresaId,
-                bearerToken: bearerToken,
-                empresaData: empresaData,
-              ),
-            ),
-          );
-        } else {
-          print('Error al obtener detalles de la empresa: '
-              '${response.statusCode}');
         }
-      } catch (e) {
-        print('Error de conexión: $e');
+
+        await HiveHelper.insertInstalaciones(empresaId, instalaciones);
+      } else {
+        print('Error al obtener instalaciones para empresa $empresaId: ${response.statusCode}');
       }
+    } catch (e) {
+      print('Error al obtener instalaciones para empresa $empresaId: $e');
     }
+  }
+
+  void navigateToEmpresaScreen(String empresaId, Map<String, dynamic> empresaData) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EmpresaScreen(
+          empresaId: empresaId,
+          bearerToken: bearerToken,
+          empresaData: empresaData,
+        ),
+      ),
+    );
   }
 
   @override
@@ -305,8 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   ),
                   child: Text(
                     'Seleccionar empresa',
@@ -330,181 +344,208 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
-      body: SingleChildScrollView(
-        child: Container(
-          color: Color(0xFFF1F3FF),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(height: 16),
-              Center(
-                child: Text(
-                  'Derivador de empresas',
-                  style: TextStyle(
-                    color: Color(0xFF86aefe),
-                    fontFamily: 'Montserrat',
-                    fontSize: 18,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              SizedBox(height: 30),
-              Center(
-                child: Text(
-                  'Seleccione una opción para continuar',
-                  style: TextStyle(
-                    color: Color(0xFF363f77),
-                    fontFamily: 'Montserrat',
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              SizedBox(height: 20),
-              TextField(
-                decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.search, color: Color(0xFF363f77)),
-                  hintText: 'Buscar empresa o grupo',
-                  hintStyle: TextStyle(
-                    fontFamily: 'Montserrat',
-                    color: Colors.grey,
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-              SizedBox(height: 20),
-              Row(
-                children: [
-                  Checkbox(
-                    value: _showPendingMessages,
-                    onChanged: (bool? value) {
-                      setState(() {
-                        _showPendingMessages = value ?? false;
-                      });
-                    },
-                  ),
-                  Text(
-                    'Ver pendientes y mensajes',
-                    style: TextStyle(
-                      color: Color(0xFF363f77),
-                      fontFamily: 'Montserrat',
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
+      body: _isLoading
+          ? Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              child: Container(
+                color: Color(0xFFF1F3FF),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(height: 16),
+                    Center(
+                      child: Text(
+                        'Derivador de empresas',
+                        style: TextStyle(
+                          color: Color(0xFF86aefe),
+                          fontFamily: 'Montserrat',
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 20),
-              Text(
-                'Empresas',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Todas las empresas:',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 14,
-                  color: Colors.black,
-                ),
-              ),
-              SizedBox(height: 20),
-              for (var empresa in empresas)
-                GestureDetector(
-                  onTap: () {
-                    getEmpresaDetails(
-                        empresa['id_empresa_asociada'], empresa);
-                  },
-                  child: Container(
-                    margin: EdgeInsets.only(bottom: 12),
-                    padding: EdgeInsets.all(12),
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
+                    SizedBox(height: 30),
+                    Center(
+                      child: Text(
+                        'Seleccione una opción para continuar',
+                        style: TextStyle(
+                          color: Color(0xFF363f77),
+                          fontFamily: 'Montserrat',
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                    child: Row(
+                    SizedBox(height: 20),
+                    TextField(
+                      decoration: InputDecoration(
+                        prefixIcon: Icon(Icons.search, color: Color(0xFF363f77)),
+                        hintText: 'Buscar empresa o grupo',
+                        hintStyle: TextStyle(
+                          fontFamily: 'Montserrat',
+                          color: Colors.grey,
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    Row(
                       children: [
-                        CircleAvatar(
-                          backgroundColor: Color(0xFF2a3666),
-                          radius: 15,
-                          backgroundImage:
-                              AssetImage('assets/company_logo.png'),
+                        Checkbox(
+                          value: _showPendingMessages,
+                          onChanged: (bool? value) {
+                            setState(() {
+                              _showPendingMessages = value ?? false;
+                            });
+                          },
                         ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            empresa['nombre'] ?? 'Empresa sin nombre',
-                            style: TextStyle(
-                              fontFamily: 'Montserrat',
-                              fontSize: 16,
-                              color: Colors.black,
-                            ),
+                        Text(
+                          'Ver pendientes y mensajes',
+                          style: TextStyle(
+                            color: Color(0xFF363f77),
+                            fontFamily: 'Montserrat',
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
                           ),
-                        ),
-                        SizedBox(width: 10),
-                        Image.asset(
-                          'assets/integral_icon.png',
-                          width: 50,
                         ),
                       ],
                     ),
-                  ),
-                ),
-              SizedBox(height: 30),
-              Text(
-                'Grupos',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Todos los grupos:',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 14,
-                  color: Colors.black,
-                ),
-              ),
-              SizedBox(height: 20),
-              for (int i = 0; i < 5; i++)
-                Container(
-                  margin: EdgeInsets.only(bottom: 12),
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: Text(
-                      'Próximamente',
+                    SizedBox(height: 20),
+                    Text(
+                      'Empresas',
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Todas las empresas:',
                       style: TextStyle(
                         fontFamily: 'Montserrat',
                         fontSize: 14,
-                        color: Colors.grey,
+                        color: Colors.black,
                       ),
                     ),
-                  ),
+                    SizedBox(height: 20),
+                    for (var empresa in empresas)
+                      GestureDetector(
+                        onTap: () {
+                          navigateToEmpresaScreen(
+                              empresa['id_empresa_asociada'], empresa);
+                        },
+                        child: Container(
+                          margin: EdgeInsets.only(bottom: 12),
+                          padding: EdgeInsets.all(12),
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                backgroundColor: Color(0xFF2a3666),
+                                radius: 15,
+                                backgroundImage:
+                                    AssetImage('assets/company_logo.png'),
+                              ),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  empresa['nombre'] ?? 'Empresa sin nombre',
+                                  style: TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    fontSize: 16,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Image.asset(
+                                'assets/integral_icon.png',
+                                width: 50,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    SizedBox(height: 30),
+                    Text(
+                      'Grupos',
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Todos los grupos:',
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        color: Colors.black,
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    for (var grupo in grupos)
+                      Container(
+                        margin: EdgeInsets.only(bottom: 12),
+                        padding: EdgeInsets.all(12),
+                        height: 50,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: Color(0xFF2a3666),
+                              radius: 15,
+                              child: Text(
+                                grupo['nombre'].toString().isNotEmpty 
+                                    ? grupo['nombre'][0].toUpperCase()
+                                    : 'G',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                grupo['nombre'] ?? 'Grupo sin nombre',
+                                style: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  fontSize: 16,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            Image.asset(
+                              'assets/integral_icon.png',
+                              width: 50,
+                            ),
+                          ],
+                        ),
+                      ),
+                    SizedBox(height: 20),
+                  ],
                 ),
-            ],
-          ),
-        ),
-      ),
+              ),
+            ),
     );
   }
 
