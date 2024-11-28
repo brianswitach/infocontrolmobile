@@ -26,8 +26,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _usernameController.text = 'api.mobile';
-    _passwordController.text = 'ApiInfoC24';
+    _usernameController.text = '';
+    _passwordController.text = '';
   }
 
   @override

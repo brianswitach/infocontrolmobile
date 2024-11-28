@@ -29,8 +29,11 @@ class _HomeScreenState extends State<HomeScreen> {
   late String bearerToken;
   Timer? _refreshTimer;
   List<Map<String, dynamic>> empresas = [];
+  List<Map<String, dynamic>> gruposFiltrados = [];
   List<Map<String, dynamic>> grupos = [];
   bool _isLoading = true;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -39,41 +42,83 @@ class _HomeScreenState extends State<HomeScreen> {
     empresas = widget.empresas;
     _startTokenRefreshTimer();
     _initializeData();
-
-    Connectivity().onConnectivityChanged.listen(
-      (ConnectivityResult result) {
-        if (result == ConnectivityResult.none) {
-          _loadLocalData();
-        } else {
-          _refreshBearerToken();
-        }
-      },
-    );
+    _setupConnectivityListener();
+    _searchController.addListener(_onSearchChanged);
   }
 
-  Future<void> _initializeData() async {
-    await _loadLocalData();
-    var connectivityResult = await Connectivity().checkConnectivity();
-    if (connectivityResult != ConnectivityResult.none) {
-      await _updateDataFromServer();
-    }
-    setState(() {
-      _isLoading = false;
+  void _setupConnectivityListener() {
+    Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
+      if (result == ConnectivityResult.none) {
+        _loadLocalData();
+      } else {
+        _refreshBearerToken();
+      }
     });
+  }
+
+  void _onSearchChanged() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      _searchQuery = query;
+      _filterData();
+    });
+  }
+
+  void _filterData() {
+    if (_searchQuery.isEmpty) {
+      gruposFiltrados = List.from(grupos);
+      return;
+    }
+
+    gruposFiltrados = grupos.where((grupo) {
+      return grupo['nombre'].toString().toLowerCase().contains(_searchQuery);
+    }).toList();
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
+  Future<void> _initializeData() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      await _loadLocalData();
+      
+      var connectivityResult = await Connectivity().checkConnectivity();
+      if (connectivityResult != ConnectivityResult.none) {
+        await _updateDataFromServer();
+      }
+    } catch (e) {
+      print('Error initializing data: $e');
+      if (empresas.isEmpty) {
+        _showErrorSnackBar('Error cargando datos: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _filterData();
+        });
+      }
+    }
+  }
+
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   void _startTokenRefreshTimer() {
+    _refreshTimer?.cancel(); // Cancel existing timer if any
     _refreshTimer = Timer.periodic(
-      Duration(seconds: 290),
-      (_) {
-        _refreshBearerToken();
-      },
+      Duration(minutes: 4, seconds: 50),
+      (_) => _refreshBearerToken(),
     );
   }
 
@@ -85,15 +130,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      String loginUrl = "https://www.infocontrol.tech/web/api/web/workers/login";
-      String basicAuth = 'Basic ' +
-          base64Encode(utf8.encode('${widget.username}:${widget.password}'));
-
       final response = await http.post(
-        Uri.parse(loginUrl),
+        Uri.parse("https://www.infocontrol.tech/web/api/web/workers/login"),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': basicAuth,
+          'Authorization': 'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
           'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
         },
         body: jsonEncode({
@@ -105,36 +146,44 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final loginData = jsonDecode(response.body);
         String newToken = loginData['data']['Bearer'];
-        setState(() {
-          bearerToken = newToken;
-        });
-        print('Token actualizado');
-
+        
+        if (mounted) {
+          setState(() {
+            bearerToken = newToken;
+          });
+        }
         await _updateDataFromServer();
       } else {
-        print('Error al actualizar el token: ${response.statusCode}');
+        throw Exception('Error al actualizar el token: ${response.statusCode}');
       }
     } catch (e) {
       print('Error al refrescar el token: $e');
+      _showErrorSnackBar('Error al refrescar el token');
     }
   }
 
   Future<void> _loadLocalData() async {
-    List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
-    List<Map<String, dynamic>> localGrupos = HiveHelper.getGrupos();
-    
-    setState(() {
-      empresas = localEmpresas;
-      grupos = localGrupos;
-    });
+    try {
+      List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
+      List<Map<String, dynamic>> localGrupos = HiveHelper.getGrupos();
+      
+      if (mounted) {
+        setState(() {
+          empresas = localEmpresas;
+          grupos = localGrupos;
+          gruposFiltrados = localGrupos;
+        });
+      }
+    } catch (e) {
+      print('Error loading local data: $e');
+      throw Exception('Error cargando datos locales');
+    }
   }
 
   Future<void> _updateDataFromServer() async {
-    String listarUrl = "https://www.infocontrol.tech/web/api/mobile/empresas/listar";
-
     try {
       final response = await http.get(
-        Uri.parse(listarUrl),
+        Uri.parse("https://www.infocontrol.tech/web/api/mobile/empresas/listar"),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $bearerToken',
@@ -142,10 +191,11 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       );
 
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
-        List<Map<String, dynamic>> empresasData =
-            List<Map<String, dynamic>>.from(responseData['data']);
+        List<Map<String, dynamic>> empresasData = List<Map<String, dynamic>>.from(responseData['data']);
 
         // Extraer grupos únicos
         Set<String> gruposUnicos = {};
@@ -164,33 +214,41 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
+        // Guardar datos localmente
         await HiveHelper.insertEmpresas(empresasData);
         await HiveHelper.insertGrupos(gruposData);
 
         // Descargar instalaciones para todas las empresas
+        List<Future<void>> instalacionesFutures = [];
         for (var empresa in empresasData) {
-          String empresaId = empresa['id_empresa_asociada'];
-          await _fetchAndStoreInstalaciones(empresaId);
+          instalacionesFutures.add(
+            _fetchAndStoreInstalaciones(empresa['id_empresa_asociada'])
+              .catchError((e) => print('Error fetching instalaciones: $e'))
+          );
         }
+        await Future.wait(instalacionesFutures);
 
-        setState(() {
-          empresas = empresasData;
-          grupos = gruposData;
-        });
+        if (mounted) {
+          setState(() {
+            empresas = empresasData;
+            grupos = gruposData;
+            gruposFiltrados = gruposData;
+            _filterData();
+          });
+        }
       } else {
-        print('Error al obtener empresas: ${response.statusCode}');
+        throw Exception('Server error: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error de conexión al actualizar datos: $e');
+      print('Error updating server data: $e');
+      throw Exception('Error actualizando datos del servidor');
     }
   }
 
   Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
-    String url = "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId";
-
     try {
       final response = await http.get(
-        Uri.parse(url),
+        Uri.parse("https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId"),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $bearerToken',
@@ -200,24 +258,25 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (response.statusCode == 200) {
-        var responseData = jsonDecode(response.body);
+        final responseData = jsonDecode(response.body);
         List<Map<String, dynamic>> instalaciones = [];
         
         if (responseData['data']['instalaciones'] != null) {
-          for (var instalacion in responseData['data']['instalaciones']) {
-            instalaciones.add({
+          instalaciones = List<Map<String, dynamic>>.from(
+            responseData['data']['instalaciones'].map((instalacion) => {
               'id_instalacion': instalacion['id_instalacion'],
               'nombre': instalacion['nombre'],
-            });
-          }
+            })
+          );
         }
 
         await HiveHelper.insertInstalaciones(empresaId, instalaciones);
       } else {
-        print('Error al obtener instalaciones para empresa $empresaId: ${response.statusCode}');
+        throw Exception('Error al obtener instalaciones: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error al obtener instalaciones para empresa $empresaId: $e');
+      print('Error fetching instalaciones: $e');
+      throw Exception('Error obteniendo instalaciones');
     }
   }
 
@@ -345,123 +404,210 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
       body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              child: Container(
-                color: Color(0xFFF1F3FF),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(height: 16),
-                    Center(
-                      child: Text(
-                        'Derivador de empresas',
-                        style: TextStyle(
-                          color: Color(0xFF86aefe),
-                          fontFamily: 'Montserrat',
-                          fontSize: 18,
-                          fontWeight: FontWeight.w500,
+          ? Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2a3666)),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _updateDataFromServer,
+              child: SingleChildScrollView(
+                physics: AlwaysScrollableScrollPhysics(),
+                child: Container(
+                  color: Color(0xFFF1F3FF),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(height: 16),
+                      Center(
+                        child: Text(
+                          'Derivador de empresas',
+                          style: TextStyle(
+                            color: Color(0xFF86aefe),
+                            fontFamily: 'Montserrat',
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
-                    ),
-                    SizedBox(height: 30),
-                    Center(
-                      child: Text(
-                        'Seleccione una opción para continuar',
-                        style: TextStyle(
-                          color: Color(0xFF363f77),
-                          fontFamily: 'Montserrat',
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    TextField(
-                      decoration: InputDecoration(
-                        prefixIcon: Icon(Icons.search, color: Color(0xFF363f77)),
-                        hintText: 'Buscar empresa o grupo',
-                        hintStyle: TextStyle(
-                          fontFamily: 'Montserrat',
-                          color: Colors.grey,
-                        ),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Checkbox(
-                          value: _showPendingMessages,
-                          onChanged: (bool? value) {
-                            setState(() {
-                              _showPendingMessages = value ?? false;
-                            });
-                          },
-                        ),
-                        Text(
-                          'Ver pendientes y mensajes',
+                      SizedBox(height: 30),
+                      Center(
+                        child: Text(
+                          'Seleccione una opción para continuar',
                           style: TextStyle(
                             color: Color(0xFF363f77),
                             fontFamily: 'Montserrat',
-                            fontSize: 14,
+                            fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
-                    ),
-                    SizedBox(height: 20),
-                    Text(
-                      'Empresas',
-                      style: TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
                       ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Todas las empresas:',
-                      style: TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontSize: 14,
-                        color: Colors.black,
+                      SizedBox(height: 20),
+                      TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          prefixIcon: Icon(Icons.search, color: Color(0xFF363f77)),
+                          hintText: 'Buscar empresa o grupo',
+                          hintStyle: TextStyle(
+                            fontFamily: 'Montserrat',
+                            color: Colors.grey,
+                          ),
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 20),
-                    for (var empresa in empresas)
-                      GestureDetector(
-                        onTap: () {
-                          navigateToEmpresaScreen(
-                              empresa['id_empresa_asociada'], empresa);
-                        },
-                        child: Container(
+                      SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: _showPendingMessages,
+                            onChanged: (bool? value) {
+                              setState(() {
+                                _showPendingMessages = value ?? false;
+                              });
+                            },
+                          ),
+                          Text(
+                            'Ver pendientes y mensajes',
+                            style: TextStyle(
+                              color: Color(0xFF363f77),
+                              fontFamily: 'Montserrat',
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 20),
+                      Text(
+                        'Empresas',
+                        style: TextStyle(
+                          fontFamily: 'Montserrat',
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Todas las empresas:',
+                        style: TextStyle(
+                          fontFamily: 'Montserrat',
+                          fontSize: 14,
+                          color: Colors.black,
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      for (var empresa in empresas.where((e) => 
+                        e['nombre'].toString().toLowerCase().contains(_searchQuery)))
+                        GestureDetector(
+                          onTap: () {
+                            navigateToEmpresaScreen(
+                                empresa['id_empresa_asociada'], empresa);
+                          },
+                          child: Container(
+                            margin: EdgeInsets.only(bottom: 12),
+                            padding: EdgeInsets.all(12),
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: Color(0xFF2a3666),
+                                  radius: 15,
+                                  backgroundImage:
+                                      AssetImage('assets/company_logo.png'),
+                                ),
+                                SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    empresa['nombre'] ?? 'Empresa sin nombre',
+                                    style: TextStyle(
+                                      fontFamily: 'Montserrat',
+                                      fontSize: 16,
+                                      color: Colors.black,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 10),
+                                Image.asset(
+                                  'assets/integral_icon.png',
+                                  width: 50,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      SizedBox(height: 30),
+                      Text(
+                        'Grupos',
+                        style: TextStyle(
+                          fontFamily: 'Montserrat',
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Todos los grupos:',
+                        style: TextStyle(
+                          fontFamily: 'Montserrat',
+                          fontSize: 14,
+                          color: Colors.black,
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      for (var grupo in gruposFiltrados)
+                        Container(
                           margin: EdgeInsets.only(bottom: 12),
                           padding: EdgeInsets.all(12),
                           height: 50,
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 4,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
                           ),
                           child: Row(
                             children: [
                               CircleAvatar(
                                 backgroundColor: Color(0xFF2a3666),
                                 radius: 15,
-                                backgroundImage:
-                                    AssetImage('assets/company_logo.png'),
+                                child: Text(
+                                  grupo['nombre'].toString().isNotEmpty 
+                                      ? grupo['nombre'][0].toUpperCase()
+                                      : 'G',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
                               SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  empresa['nombre'] ?? 'Empresa sin nombre',
+                                  grupo['nombre'] ?? 'Grupo sin nombre',
                                   style: TextStyle(
                                     fontFamily: 'Montserrat',
                                     fontSize: 16,
@@ -477,72 +623,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                         ),
-                      ),
-                    SizedBox(height: 30),
-                    Text(
-                      'Grupos',
-                      style: TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Todos los grupos:',
-                      style: TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontSize: 14,
-                        color: Colors.black,
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    for (var grupo in grupos)
-                      Container(
-                        margin: EdgeInsets.only(bottom: 12),
-                        padding: EdgeInsets.all(12),
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              backgroundColor: Color(0xFF2a3666),
-                              radius: 15,
-                              child: Text(
-                                grupo['nombre'].toString().isNotEmpty 
-                                    ? grupo['nombre'][0].toUpperCase()
-                                    : 'G',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                grupo['nombre'] ?? 'Grupo sin nombre',
-                                style: TextStyle(
-                                  fontFamily: 'Montserrat',
-                                  fontSize: 16,
-                                  color: Colors.black,
-                                ),
-                              ),
-                            ),
-                            SizedBox(width: 10),
-                            Image.asset(
-                              'assets/integral_icon.png',
-                              width: 50,
-                            ),
-                          ],
-                        ),
-                      ),
-                    SizedBox(height: 20),
-                  ],
+                      SizedBox(height: 20),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -565,4 +648,4 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
-}
+} 
