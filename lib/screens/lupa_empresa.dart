@@ -3,18 +3,21 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
   final String bearerToken;
   final String idEmpresaAsociada;
   final String empresaId;
+  final bool openScannerOnInit;
 
   LupaEmpresaScreen({
     required this.empresa,
     required this.bearerToken,
     required this.idEmpresaAsociada,
     required this.empresaId,
+    this.openScannerOnInit = false,
   });
 
   @override
@@ -31,18 +34,110 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   List<dynamic> empleados = [];
   bool isLoading = true;
   bool isLoadingContractors = false;
+  final MobileScannerController controladorCamara = MobileScannerController();
+
+  // Controladores para los campos de texto
+  final TextEditingController personalIdController = TextEditingController();
+  final TextEditingController dominioController = TextEditingController();
+
+  bool qrScanned = false; // Indica si ya se escaneó un QR
 
   @override
   void initState() {
     super.initState();
-    obtenerEmpleados();
+    obtenerEmpleados().then((_) {
+      // Si la pantalla se recargó para volver a escanear (openScannerOnInit = true), abrir la cámara
+      if (widget.openScannerOnInit) {
+        _mostrarEscanerQR();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    controladorCamara.dispose();
+    personalIdController.dispose();
+    dominioController.dispose();
+    super.dispose();
+  }
+
+  void _mostrarEscanerQR() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (BuildContext context) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.8,
+          child: Column(
+            children: [
+              AppBar(
+                backgroundColor: const Color(0xFF2a3666),
+                title: const Text(
+                  'Escanear QR',
+                  style: TextStyle(
+                    fontFamily: 'Montserrat',
+                    color: Colors.white,
+                  ),
+                ),
+                leading: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                ),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.flash_on, color: Colors.white),
+                    onPressed: () => controladorCamara.toggleTorch(),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.flip_camera_android, color: Colors.white),
+                    onPressed: () => controladorCamara.switchCamera(),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: MobileScanner(
+                  controller: controladorCamara,
+                  onDetect: (captura) {
+                    final List<Barcode> codigosBarras = captura.barcodes;
+                    if (codigosBarras.isNotEmpty) {
+                      final String codigo = codigosBarras.first.rawValue ?? '';
+                      Navigator.pop(context);
+
+                      try {
+                        final qrData = jsonDecode(codigo);
+                        final entidad = qrData['entidad'];
+
+                        if (entidad == 'empleado') {
+                          final dni = qrData['dni'] ?? 'DNI no disponible';
+                          personalIdController.text = dni;
+                        } else if (entidad == 'vehiculo') {
+                          final dominio = qrData['dominio'] ?? 'Dominio no disponible';
+                          dominioController.text = dominio;
+                        }
+                        // Marca que se escaneó un QR
+                        setState(() {
+                          qrScanned = true;
+                        });
+                      } catch (e) {
+                        // No mostramos cartel ni nada
+                      }
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> obtenerEmpleados() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      List<dynamic>? empleadosLocales =
-          HiveHelper.getEmpleados(widget.empresaId);
+      List<dynamic>? empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales != null && empleadosLocales.isNotEmpty) {
         setState(() {
           empleados = empleadosLocales;
@@ -53,18 +148,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           isLoading = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content:
-                Text('No hay datos locales disponibles para empleados.'),
+          const SnackBar(
+            content: Text('No hay datos locales disponibles para empleados.'),
             backgroundColor: Colors.red,
           ),
         );
       }
     } else {
       try {
-        print('Bearer Token: ${widget.bearerToken}');
-        print('ID Empresa Asociada: ${widget.idEmpresaAsociada}');
-
         final url = Uri.parse(
           'https://www.infocontrol.tech/web/api/mobile/empleados/listar',
         ).replace(queryParameters: {
@@ -81,38 +172,28 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           },
         );
 
-        print('Response headers: ${response.headers}');
-        print('Response body raw: ${response.body}');
         if (response.statusCode == 200) {
           final responseData = jsonDecode(response.body);
-          print('Response completa: $responseData');
-
           setState(() {
             empleados = responseData['data'] ?? [];
             isLoading = false;
           });
-
           await HiveHelper.insertEmpleados(widget.empresaId, empleados);
         } else {
-          print('Error al obtener empleados: ${response.statusCode}');
           setState(() {
             isLoading = false;
           });
-
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content:
-                  Text('Error al obtener empleados: ${response.statusCode}'),
+              content: Text('Error al obtener empleados: ${response.statusCode}'),
               backgroundColor: Colors.red,
             ),
           );
         }
       } catch (e) {
-        print('Error en la solicitud: $e');
         setState(() {
           isLoading = false;
         });
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error en la solicitud: $e'),
@@ -131,74 +212,87 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
     setState(() {
       selectedContractor = nombreRazonSocial;
-      selectedContractorCuit =
-          empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
-      selectedContractorTipo =
-          empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
-      selectedContractorMensajeGeneral = empleadoSeleccionado != null
-          ? empleadoSeleccionado['mensaje_general']
-          : '';
+      selectedContractorCuit = empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
+      selectedContractorTipo = empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
+      selectedContractorMensajeGeneral = empleadoSeleccionado != null ? empleadoSeleccionado['mensaje_general'] : '';
       showContractorInfo = true;
     });
   }
 
+  void _reIniciarPaginaYEscanear() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LupaEmpresaScreen(
+          empresa: widget.empresa,
+          bearerToken: widget.bearerToken,
+          idEmpresaAsociada: widget.idEmpresaAsociada,
+          empresaId: widget.empresaId,
+          openScannerOnInit: true, // Esto hace que se abra automáticamente la cámara al recargar.
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    String botonQrText = qrScanned ? "Ingresar con otro QR" : "Ingreso con QR";
+
     return Scaffold(
       appBar: PreferredSize(
-        preferredSize: Size.fromHeight(60),
+        preferredSize: const Size.fromHeight(60),
         child: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
           leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: Color(0xFF2a3666)),
+            icon: const Icon(Icons.arrow_back, color: Color(0xFF2a3666)),
             onPressed: () {
               Navigator.pop(context);
             },
           ),
           actions: [
             IconButton(
-              icon: Icon(Icons.search, color: Color(0xFF2a3666)),
+              icon: const Icon(Icons.search, color: Color(0xFF2a3666)),
               onPressed: () {},
             ),
             Container(
               height: 24,
               width: 1,
               color: Colors.grey[300],
-              margin: EdgeInsets.symmetric(horizontal: 10),
+              margin: const EdgeInsets.symmetric(horizontal: 10),
             ),
             CircleAvatar(
-              backgroundColor: Color(0xFF232e63),
+              backgroundColor: const Color(0xFF232e63),
               radius: 15,
               child: Text(
                 widget.empresa['nombre']?[0] ?? 'E',
-                style: TextStyle(
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
                 ),
               ),
             ),
-            SizedBox(width: 5),
-            Icon(
+            const SizedBox(width: 5),
+            const Icon(
               Icons.arrow_drop_down,
               color: Color(0xFF232e63),
             ),
-            SizedBox(width: 10),
+            const SizedBox(width: 10),
           ],
         ),
       ),
       body: isLoading
-          ? Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               child: Container(
-                color: Color(0xFFe6e6e6),
+                color: const Color(0xFFe6e6e6),
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
                     Container(
                       width: double.infinity,
-                      padding: EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
@@ -207,25 +301,24 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            widget.empresa['nombre'] ??
-                                'Nombre no disponible',
-                            style: TextStyle(
+                            widget.empresa['nombre'] ?? 'Nombre no disponible',
+                            style: const TextStyle(
                               fontFamily: 'Montserrat',
                               fontSize: 18,
                               color: Color(0xFF7e8e95),
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          SizedBox(height: 8),
+                          const SizedBox(height: 8),
                           Divider(color: Colors.grey[300], thickness: 1),
-                          SizedBox(height: 8),
+                          const SizedBox(height: 8),
                           Container(
-                            padding: EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Color(0xFFe0f7fa),
+                              color: const Color(0xFFe0f7fa),
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Text(
+                            child: const Text(
                               "Complete alguno de los filtros para obtener resultados. Puede buscar por contratista, empleado, vehículo o maquinaria",
                               style: TextStyle(
                                 fontFamily: 'Montserrat',
@@ -238,10 +331,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                         ],
                       ),
                     ),
-                    SizedBox(height: 30),
+                    const SizedBox(height: 30),
                     Container(
                       width: double.infinity,
-                      padding: EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
@@ -249,7 +342,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
+                          const Text(
                             'Filtros de Búsquedas',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
@@ -258,10 +351,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          SizedBox(height: 8),
+                          const SizedBox(height: 8),
                           Divider(color: Colors.grey[300], thickness: 1),
-                          SizedBox(height: 20),
-                          Text(
+                          const SizedBox(height: 20),
+                          const Text(
                             'Contratista',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
@@ -269,23 +362,20 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               color: Colors.black,
                             ),
                           ),
-                          SizedBox(height: 10),
+                          const SizedBox(height: 10),
                           isLoadingContractors
-                              ? Center(child: CircularProgressIndicator())
+                              ? const Center(child: CircularProgressIndicator())
                               : DropdownButtonFormField<String>(
                                   isExpanded: true,
                                   items: empleados
-                                      .map((e) => e['nombre_razon_social']
-                                              ?.toString() ??
-                                          '')
+                                      .map((e) => e['nombre_razon_social']?.toString() ?? '')
                                       .toSet()
-                                      .map<DropdownMenuItem<String>>(
-                                          (nombreRazonSocial) {
+                                      .map<DropdownMenuItem<String>>((nombreRazonSocial) {
                                     return DropdownMenuItem<String>(
                                       value: nombreRazonSocial,
                                       child: Text(
                                         nombreRazonSocial,
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           fontFamily: 'Montserrat',
                                         ),
                                         overflow: TextOverflow.ellipsis,
@@ -300,24 +390,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                     }
                                   },
                                   decoration: InputDecoration(
-                                    contentPadding: EdgeInsets.symmetric(
-                                        vertical: 10, horizontal: 15),
+                                    contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
                                     hintText: 'Seleccione Contratista',
-                                    hintStyle: TextStyle(
+                                    hintStyle: const TextStyle(
                                       fontFamily: 'Montserrat',
                                       color: Colors.grey,
                                     ),
                                     filled: true,
                                     fillColor: Colors.grey[200],
                                     border: OutlineInputBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(12),
+                                      borderRadius: BorderRadius.circular(12),
                                       borderSide: BorderSide.none,
                                     ),
                                   ),
                                 ),
-                          SizedBox(height: 20),
-                          Text(
+                          const SizedBox(height: 20),
+                          const Text(
                             'Número de Identificación Personal',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
@@ -325,8 +413,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               color: Colors.black,
                             ),
                           ),
-                          SizedBox(height: 4),
-                          Text(
+                          const SizedBox(height: 4),
+                          const Text(
                             '(Sin puntos ni guiones)',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
@@ -334,44 +422,42 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               color: Colors.grey,
                             ),
                           ),
-                          SizedBox(height: 10),
+                          const SizedBox(height: 10),
                           Row(
                             children: [
                               Expanded(
                                 child: TextField(
+                                  controller: personalIdController,
                                   decoration: InputDecoration(
-                                    hintText:
-                                        'Número de Identificación Personal',
-                                    hintStyle: TextStyle(
+                                    hintText: 'Número de Identificación Personal',
+                                    hintStyle: const TextStyle(
                                       fontFamily: 'Montserrat',
                                       color: Colors.grey,
                                     ),
                                     filled: true,
                                     fillColor: Colors.grey[200],
                                     border: OutlineInputBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(12),
+                                      borderRadius: BorderRadius.circular(12),
                                       borderSide: BorderSide.none,
                                     ),
                                   ),
                                 ),
                               ),
-                              SizedBox(width: 8),
+                              const SizedBox(width: 8),
                               Container(
                                 decoration: BoxDecoration(
-                                  color: Color(0xFF43b6ed),
+                                  color: const Color(0xFF43b6ed),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: IconButton(
-                                  icon: Icon(Icons.search,
-                                      color: Colors.white),
+                                  icon: const Icon(Icons.search, color: Colors.white),
                                   onPressed: () {},
                                 ),
                               ),
                             ],
                           ),
-                          SizedBox(height: 20),
-                          Text(
+                          const SizedBox(height: 20),
+                          const Text(
                             'Dominio/Placa/N° de Serie/N° de Chasis',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
@@ -379,8 +465,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               color: Colors.black,
                             ),
                           ),
-                          SizedBox(height: 4),
-                          Text(
+                          const SizedBox(height: 4),
+                          const Text(
                             '(Sin espacios ni guiones)',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
@@ -388,86 +474,117 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               color: Colors.grey,
                             ),
                           ),
-                          SizedBox(height: 10),
+                          const SizedBox(height: 10),
                           Row(
                             children: [
                               Expanded(
                                 child: TextField(
+                                  controller: dominioController,
                                   decoration: InputDecoration(
                                     hintText: 'DOMINIO EJ: ABC123',
-                                    hintStyle: TextStyle(
+                                    hintStyle: const TextStyle(
                                       fontFamily: 'Montserrat',
                                       color: Colors.grey,
                                     ),
                                     filled: true,
                                     fillColor: Colors.grey[200],
                                     border: OutlineInputBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(12),
+                                      borderRadius: BorderRadius.circular(12),
                                       borderSide: BorderSide.none,
                                     ),
                                   ),
                                 ),
                               ),
-                              SizedBox(width: 8),
+                              const SizedBox(width: 8),
                               Container(
                                 decoration: BoxDecoration(
-                                  color: Color(0xFF43b6ed),
+                                  color: const Color(0xFF43b6ed),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: IconButton(
-                                  icon: Icon(Icons.search,
-                                      color: Colors.white),
+                                  icon: const Icon(Icons.search, color: Colors.white),
                                   onPressed: () {},
                                 ),
                               ),
                             ],
                           ),
+                          const SizedBox(height: 16),
+                          // Botón de QR
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                if (qrScanned) {
+                                  _reIniciarPaginaYEscanear();
+                                } else {
+                                  _mostrarEscanerQR();
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF00BCD4),
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(
+                                    Icons.qr_code_scanner,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    botonQrText,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                      fontFamily: 'Montserrat',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                           if (showContractorInfo) ...[
-                            SizedBox(height: 30),
+                            const SizedBox(height: 30),
                             Container(
                               width: double.infinity,
-                              padding: EdgeInsets.all(16),
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     selectedContractor ?? 'Empresa',
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       fontFamily: 'Montserrat',
                                       fontSize: 20,
                                       fontWeight: FontWeight.bold,
                                       color: Color(0xFF232e5f),
                                     ),
                                   ),
-                                  SizedBox(height: 20),
+                                  const SizedBox(height: 20),
                                   Container(
-                                    padding: EdgeInsets.all(16),
+                                    padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      color: selectedContractorMensajeGeneral
-                                                  ?.toLowerCase()
-                                                  .contains('inhabilitado') ==
-                                              true
+                                      color: selectedContractorMensajeGeneral?.toLowerCase().contains('inhabilitado') == true
                                           ? Colors.red[300]
                                           : Colors.green[300],
-                                      borderRadius:
-                                          BorderRadius.circular(8),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Center(
                                       child: Text(
-                                        selectedContractorMensajeGeneral
-                                                    ?.toLowerCase()
-                                                    .contains(
-                                                        'inhabilitado') ==
-                                                true
+                                        selectedContractorMensajeGeneral?.toLowerCase().contains('inhabilitado') == true
                                             ? 'CONTRATISTA INHABILITADO'
                                             : 'CONTRATISTA HABILITADO',
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           fontFamily: 'Montserrat',
                                           fontSize: 16,
                                           color: Colors.white,
@@ -476,80 +593,63 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                       ),
                                     ),
                                   ),
-                                  SizedBox(height: 20),
+                                  const SizedBox(height: 20),
                                   Text(
                                     'Razón Social: ${selectedContractor ?? 'No disponible'}',
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       fontFamily: 'Montserrat',
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  SizedBox(height: 8),
-                                  Text(
-                                      'CUIT: ${selectedContractorCuit ?? 'No disponible'}'),
-                                  Text('Tipo persona: -'),
-                                  Text(
-                                      'Tipo trabajador: ${selectedContractorTipo ?? 'No disponible'}'),
-                                  Text('Actividades: -'),
-                                  SizedBox(height: 20),
+                                  const SizedBox(height: 8),
+                                  Text('CUIT: ${selectedContractorCuit ?? 'No disponible'}'),
+                                  const Text('Tipo persona: -'),
+                                  Text('Tipo trabajador: ${selectedContractorTipo ?? 'No disponible'}'),
+                                  const Text('Actividades: -'),
+                                  const SizedBox(height: 20),
                                   Row(
                                     children: [
                                       Expanded(
                                         child: ElevatedButton(
                                           onPressed: () {
                                             setState(() {
-                                              showEmployees =
-                                                  !showEmployees;
+                                              showEmployees = !showEmployees;
                                             });
                                           },
-                                          style:
-                                              ElevatedButton.styleFrom(
-                                            backgroundColor:
-                                                Colors.grey[200],
-                                            padding: EdgeInsets.symmetric(
-                                                vertical: 12),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.grey[200],
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
                                           ),
                                           child: Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.people,
-                                                  color: Colors.black54),
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: const [
+                                              Icon(Icons.people, color: Colors.black54),
                                               SizedBox(width: 8),
                                               Text(
                                                 'Empleados',
-                                                style: TextStyle(
-                                                    color:
-                                                        Colors.black54),
+                                                style: TextStyle(color: Colors.black54),
                                               ),
                                             ],
                                           ),
                                         ),
                                       ),
-                                      SizedBox(width: 8),
+                                      const SizedBox(width: 8),
                                       Expanded(
                                         child: ElevatedButton(
                                           onPressed: () {},
-                                          style:
-                                              ElevatedButton.styleFrom(
-                                            backgroundColor:
-                                                Colors.grey[200],
-                                            padding: EdgeInsets.symmetric(
-                                                vertical: 12),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.grey[200],
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
                                           ),
                                           child: Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.directions_car,
-                                                  color: Colors.black54),
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: const [
+                                              Icon(Icons.directions_car, color: Colors.black54),
                                               SizedBox(width: 8),
                                               Text(
                                                 'Vehículos',
-                                                style: TextStyle(
-                                                    color:
-                                                        Colors.black54),
+                                                style: TextStyle(color: Colors.black54),
                                               ),
                                             ],
                                           ),
@@ -557,10 +657,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                       ),
                                     ],
                                   ),
-                                  if (showEmployees &&
-                                      empleados.isNotEmpty) ...[
-                                    SizedBox(height: 20),
-                                    Text(
+                                  if (showEmployees && empleados.isNotEmpty) ...[
+                                    const SizedBox(height: 20),
+                                    const Text(
                                       'Empleados',
                                       style: TextStyle(
                                         fontFamily: 'Montserrat',
@@ -569,91 +668,59 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                    SizedBox(height: 10),
-                                    ...empleados
-                                        .map((empleado) => Padding(
-                                              padding:
-                                                  const EdgeInsets.only(
-                                                      bottom: 8.0),
-                                              child: Row(
-                                                children: [
-                                                  Expanded(
-                                                    child: Text(
-                                                      '${empleado['documento']} - ${empleado['apellido_nombre']}',
-                                                      style: TextStyle(
-                                                        color: empleado[
-                                                                    'habilitado'] ==
-                                                                true
-                                                            ? Colors.green
-                                                            : Colors
-                                                                .red[800],
-                                                      ),
-                                                    ),
+                                    const SizedBox(height: 10),
+                                    ...empleados.map((empleado) => Padding(
+                                          padding: const EdgeInsets.only(bottom: 8.0),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  '${empleado['documento']} - ${empleado['apellido_nombre']}',
+                                                  style: TextStyle(
+                                                    color: empleado['habilitado'] == true ? Colors.green : Colors.red[800],
                                                   ),
-                                                  SizedBox(width: 8),
-                                                  ElevatedButton(
-                                                    onPressed: () {},
-                                                    style: ElevatedButton
-                                                        .styleFrom(
-                                                      backgroundColor:
-                                                          Color(
-                                                              0xFF43b6ed),
-                                                      padding:
-                                                          EdgeInsets
-                                                              .symmetric(
-                                                                  horizontal:
-                                                                      8,
-                                                                  vertical:
-                                                                      4),
-                                                      minimumSize:
-                                                          Size(60, 30),
-                                                    ),
-                                                    child: Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                            Icons
-                                                                .arrow_forward,
-                                                            color: Colors
-                                                                .white,
-                                                            size: 16),
-                                                        SizedBox(width: 4),
-                                                        Text(
-                                                          'Entrar',
-                                                          style: TextStyle(
-                                                              color: Colors
-                                                                  .white,
-                                                              fontSize: 12),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
+                                                ),
                                               ),
-                                            ))
-                                        .toList(),
+                                              const SizedBox(width: 8),
+                                              ElevatedButton(
+                                                onPressed: () {},
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: const Color(0xFF43b6ed),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                  minimumSize: const Size(60, 30),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: const [
+                                                    Icon(Icons.arrow_forward, color: Colors.white, size: 16),
+                                                    SizedBox(width: 4),
+                                                    Text(
+                                                      'Entrar',
+                                                      style: TextStyle(color: Colors.white, fontSize: 12),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        )).toList(),
                                   ],
-                                  SizedBox(height: 20),
+                                  const SizedBox(height: 20),
                                   Center(
                                     child: ElevatedButton(
                                       onPressed: () {},
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.grey[300],
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 24,
-                                            vertical: 12),
+                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                                       ),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.print,
-                                              color: Colors.black54),
+                                        children: const [
+                                          Icon(Icons.print, color: Colors.black54),
                                           SizedBox(width: 8),
                                           Text(
                                             'Imprimir',
-                                            style: TextStyle(
-                                                color: Colors.black54),
+                                            style: TextStyle(color: Colors.black54),
                                           ),
                                         ],
                                       ),
@@ -666,7 +733,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                         ],
                       ),
                     ),
-                    SizedBox(height: 30),
+                    const SizedBox(height: 30),
                     Center(
                       child: Image.asset(
                         'assets/infocontrol_logo.png',

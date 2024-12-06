@@ -34,12 +34,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = true;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  List<Map<String, dynamic>> empresasFiltradas = [];
 
   @override
   void initState() {
     super.initState();
     bearerToken = widget.bearerToken;
     empresas = widget.empresas;
+    empresasFiltradas = widget.empresas;
     _startTokenRefreshTimer();
     _initializeData();
     _setupConnectivityListener();
@@ -57,7 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onSearchChanged() {
-    final query = _searchController.text.toLowerCase();
+    final query = _searchController.text.toLowerCase().trim();
     setState(() {
       _searchQuery = query;
       _filterData();
@@ -65,14 +67,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _filterData() {
-    if (_searchQuery.isEmpty) {
-      gruposFiltrados = List.from(grupos);
-      return;
-    }
-
-    gruposFiltrados = grupos.where((grupo) {
-      return grupo['nombre'].toString().toLowerCase().contains(_searchQuery);
-    }).toList();
+    setState(() {
+      if (_searchQuery.isEmpty) {
+        empresasFiltradas = List.from(empresas);
+        gruposFiltrados = List.from(grupos);
+        return;
+      }
+      empresasFiltradas = empresas.where((empresa) {
+        return empresa['nombre']
+            .toString()
+            .toLowerCase()
+            .startsWith(_searchQuery);
+      }).toList();
+      gruposFiltrados = grupos.where((grupo) {
+        return grupo['nombre']
+            .toString()
+            .toLowerCase()
+            .startsWith(_searchQuery);
+      }).toList();
+    });
   }
 
   @override
@@ -84,10 +97,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initializeData() async {
     setState(() => _isLoading = true);
-    
     try {
       await _loadLocalData();
-      
       var connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult != ConnectivityResult.none) {
         await _updateDataFromServer();
@@ -115,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _startTokenRefreshTimer() {
-    _refreshTimer?.cancel(); // Cancel existing timer if any
+    _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(
       Duration(minutes: 4, seconds: 50),
       (_) => _refreshBearerToken(),
@@ -196,8 +207,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
         List<Map<String, dynamic>> empresasData = List<Map<String, dynamic>>.from(responseData['data']);
-
-        // Extraer grupos únicos
         Set<String> gruposUnicos = {};
         List<Map<String, dynamic>> gruposData = [];
         
@@ -214,11 +223,9 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        // Guardar datos localmente
         await HiveHelper.insertEmpresas(empresasData);
         await HiveHelper.insertGrupos(gruposData);
 
-        // Descargar instalaciones para todas las empresas
         List<Future<void>> instalacionesFutures = [];
         for (var empresa in empresasData) {
           instalacionesFutures.add(
@@ -231,6 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           setState(() {
             empresas = empresasData;
+            empresasFiltradas = empresasData;
             grupos = gruposData;
             gruposFiltrados = gruposData;
             _filterData();
@@ -435,8 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Center(
                         child: Text(
                           'Seleccione una opción para continuar',
-                          style: TextStyle(
-                            color: Color(0xFF363f77),
+                          style: TextStyle(color: Color(0xFF363f77),
                             fontFamily: 'Montserrat',
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -503,8 +510,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       SizedBox(height: 20),
-                      for (var empresa in empresas.where((e) => 
-                        e['nombre'].toString().toLowerCase().contains(_searchQuery)))
+                      for (var empresa in empresasFiltradas)
                         GestureDetector(
                           onTap: () {
                             navigateToEmpresaScreen(
@@ -648,4 +654,4 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
-} 
+}
