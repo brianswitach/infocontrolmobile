@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'dart:math';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
@@ -41,6 +42,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   final TextEditingController dominioController = TextEditingController();
 
   bool qrScanned = false; // Indica si ya se escaneó un QR
+  
+  // Variable para almacenar el resultado de la habilitación
+  bool? resultadoHabilitacion; // null: no mostrar nada, true: habilitado, false: inhabilitado
 
   @override
   void initState() {
@@ -232,6 +236,42 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         ),
       ),
     );
+  }
+
+  void _buscarPersonalId() {
+    final texto = personalIdController.text.trim();
+    if (texto.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Falta informacion en el campo'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Al tener informacion, determinamos habilitación al azar
+    setState(() {
+      resultadoHabilitacion = Random().nextBool();
+    });
+  }
+
+  void _buscarDominio() {
+    final texto = dominioController.text.trim();
+    if (texto.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Falta informacion en el campo'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Al tener informacion, determinamos habilitación al azar
+    setState(() {
+      resultadoHabilitacion = Random().nextBool();
+    });
   }
 
   @override
@@ -451,7 +491,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                 ),
                                 child: IconButton(
                                   icon: const Icon(Icons.search, color: Colors.white),
-                                  onPressed: () {},
+                                  onPressed: _buscarPersonalId,
                                 ),
                               ),
                             ],
@@ -503,13 +543,65 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                 ),
                                 child: IconButton(
                                   icon: const Icon(Icons.search, color: Colors.white),
-                                  onPressed: () {},
+                                  onPressed: _buscarDominio,
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 16),
+                          
+                          // Aquí mostramos el resultado si existe
+                          if (resultadoHabilitacion != null) ...[
+                            const SizedBox(height: 16),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: resultadoHabilitacion! ? Colors.green[300] : Colors.red[300],
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  resultadoHabilitacion! ? 'HABILITADO' : 'INHABILITADO',
+                                  style: const TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    fontSize: 16,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (resultadoHabilitacion! == false) ...[
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: () {
+                                    // Acción al presionar el botón "Marcar ingreso con excepción"
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.grey[300],
+                                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: const [
+                                      Icon(Icons.warning, color: Colors.black54),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Marcar ingreso con excepción',
+                                        style: TextStyle(color: Colors.black54),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+
                           // Botón de QR
+                          const SizedBox(height: 16),
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
