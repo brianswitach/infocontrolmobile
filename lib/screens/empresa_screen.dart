@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import './lupa_empresa.dart';
 import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import './home_screen.dart';
 
 class EmpresaScreen extends StatefulWidget {
   final String empresaId;
@@ -95,11 +96,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                 ),
               ),
             ),
-            SizedBox(width: 5),
-            Icon(
-              Icons.arrow_drop_down,
-              color: Color(0xFF232e63),
-            ),
             SizedBox(width: 10),
           ],
         ),
@@ -153,7 +149,22 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               SizedBox(height: 20),
               Center(
                 child: OutlinedButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    // Al presionar "Seleccionar empresa" se abre home_screen.dart
+                    // Aquí utilizamos algunos valores por defecto para username, password y empresas
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => HomeScreen(
+                          bearerToken: widget.bearerToken,
+                          empresas: [],
+                          username: '',
+                          password: '',
+                        ),
+                      ),
+                      (Route<dynamic> route) => false,
+                    );
+                  },
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: Colors.white, width: 1),
                     shape: RoundedRectangleBorder(

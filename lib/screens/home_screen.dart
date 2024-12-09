@@ -304,112 +304,11 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: Size.fromHeight(60),
-        child: AppBar(
-          backgroundColor: Colors.white,
-          elevation: 0,
-          title: Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              IconButton(
-                icon: Icon(Icons.notifications, color: Color(0xFF2a3666)),
-                onPressed: () {},
-                constraints: BoxConstraints(),
-                padding: EdgeInsets.symmetric(horizontal: 8),
-              ),
-              IconButton(
-                icon: Icon(Icons.message, color: Color(0xFF2a3666)),
-                onPressed: () {},
-                constraints: BoxConstraints(),
-                padding: EdgeInsets.symmetric(horizontal: 8),
-              ),
-              IconButton(
-                icon: Icon(Icons.settings, color: Color(0xFF2a3666)),
-                onPressed: () {},
-                constraints: BoxConstraints(),
-                padding: EdgeInsets.symmetric(horizontal: 8),
-              ),
-              IconButton(
-                icon: Icon(Icons.people, color: Color(0xFF2a3666)),
-                onPressed: () {},
-                constraints: BoxConstraints(),
-                padding: EdgeInsets.symmetric(horizontal: 8),
-              ),
-              IconButton(
-                icon: Icon(Icons.info, color: Color(0xFF2a3666)),
-                onPressed: () {},
-                constraints: BoxConstraints(),
-                padding: EdgeInsets.symmetric(horizontal: 8),
-              ),
-            ],
-          ),
-        ),
-      ),
-      drawer: Drawer(
-        child: Container(
-          color: Color(0xFF232e5f),
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              Container(
-                padding: EdgeInsets.only(top: 20),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Center(
-                      child: Image.asset(
-                        'assets/infocontrol_logo.png',
-                        width: 200,
-                      ),
-                    ),
-                    SizedBox(height: 25),
-                    Center(
-                      child: Text(
-                        widget.username,
-                        style: TextStyle(
-                          fontFamily: 'Montserrat',
-                          fontSize: 20,
-                          color: Color(0xFF3d77e9),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(height: 20),
-              Center(
-                child: OutlinedButton(
-                  onPressed: () {},
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: Colors.white, width: 1),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  ),
-                  child: Text(
-                    'Seleccionar empresa',
-                    style: TextStyle(
-                      fontFamily: 'Montserrat',
-                      fontSize: 16,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(height: 30),
-              _buildDrawerItem(Icons.home, 'Inicio'),
-              _buildDrawerItem(Icons.settings, 'Configuración'),
-              _buildDrawerItem(Icons.swap_horiz, 'Control de Cambios'),
-              _buildDrawerItem(Icons.message, 'Mensajes'),
-              _buildDrawerItem(Icons.link, 'Vinculación de Contratistas'),
-              _buildDrawerItem(Icons.lock, 'Accesos Restringidos'),
-              _buildDrawerItem(Icons.history, 'Historial de Contratistas'),
-            ],
-          ),
-        ),
+      // Se han removido el drawer y los iconos del AppBar
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: Container(),
       ),
       body: _isLoading
           ? Center(
@@ -443,7 +342,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       Center(
                         child: Text(
                           'Seleccione una opción para continuar',
-                          style: TextStyle(color: Color(0xFF363f77),
+                          style: TextStyle(
+                            color: Color(0xFF363f77),
                             fontFamily: 'Montserrat',
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -637,21 +537,4 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
     );
   }
-
-  ListTile _buildDrawerItem(IconData icon, String title) {
-    return ListTile(
-      leading: Icon(icon, color: Colors.white),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontFamily: 'Montserrat',
-          fontSize: 16,
-          color: Colors.white,
-        ),
-      ),
-      onTap: () {
-        Navigator.pop(context);
-      },
-    );
-  }
-} 
+}

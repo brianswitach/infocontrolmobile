@@ -16,7 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   String bearerToken = "";
-  String _language = 'es';
+  String _language = 'es'; // Se mantiene solo idioma español
   bool _showPendingMessages = false;
   List<Map<String, dynamic>> empresas = [];
   String? empresaNombre;
@@ -45,13 +45,8 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _changeLanguage(String language) {
-    setState(() {
-      _language = language;
-    });
-  }
-
   String getText(String key) {
+    // Como solo queda español, utilizamos directamente el texto en español
     final Map<String, String> _spanishText = {
       'login': 'Iniciar sesión',
       'subtitle': 'Complete con sus datos para continuar',
@@ -65,42 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'learnMore': 'Conocer más',
     };
 
-    final Map<String, String> _englishText = {
-      'login': 'Log in',
-      'subtitle': 'Fill in your details to continue',
-      'userField': 'User / ID Number',
-      'passwordField': 'Password',
-      'rememberData': 'Remember me',
-      'forgotPassword': 'Forgot your password?',
-      'loginButton': 'Log in',
-      'promoTitle': 'Optimize contractor management with AI',
-      'promoSubtitle': 'Comprehensive control, outstanding results.',
-      'learnMore': 'Learn more',
-    };
-
-    final Map<String, String> _portugueseText = {
-      'login': 'Iniciar sessão',
-      'subtitle': 'Complete com seus dados para continuar',
-      'userField': 'Usuário / Nº Identidade',
-      'passwordField': 'Senha',
-      'rememberData': 'Lembrar dados',
-      'forgotPassword': 'Esqueceu sua senha?',
-      'loginButton': 'Entrar',
-      'promoTitle': 'Otimize a gestão de seus contratados com IA',
-      'promoSubtitle': 'Controle integral, resultados excelentes.',
-      'learnMore': 'Saiba mais',
-    };
-
-    switch (_language) {
-      case 'es':
-        return _spanishText[key] ?? '';
-      case 'en':
-        return _englishText[key] ?? '';
-      case 'pt':
-        return _portugueseText[key] ?? '';
-      default:
-        return '';
-    }
+    return _spanishText[key] ?? '';
   }
 
   Future<void> login(BuildContext context) async {
@@ -128,11 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         } else {
           print('No hay conexión y no hay datos locales disponibles.');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('No hay conexión y no hay datos locales disponibles.'),
-            ),
-          );
+          _showAlertDialog(context, 'No hay conexión y no hay datos locales disponibles.');
         }
         return;
       }
@@ -202,21 +158,16 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         );
+      } else if (loginResponse.statusCode == 404) {
+        // Mostrar alerta en el medio de la pantalla
+        _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       } else {
-        print('Error en login: ${loginResponse.statusCode}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error en login: ${loginResponse.statusCode}'),
-          ),
-        );
+        // Aquí cambia el texto del error
+        _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       }
     } catch (e) {
       print('Error de conexión en login: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error de conexión en login'),
-        ),
-      );
+      _showAlertDialog(context, 'Error de conexión en login');
     }
   }
 
@@ -265,8 +216,8 @@ class _LoginScreenState extends State<LoginScreen> {
         await HiveHelper.insertEmpresas(empresas);
 
         setState(() {
-          empresaNombre = empresas[0]['nombre'];
-          empresaId = empresas[0]['id_empresa_asociada'];
+          empresaNombre = empresas.isNotEmpty ? empresas[0]['nombre'] : null;
+          empresaId = empresas.isNotEmpty ? empresas[0]['id_empresa_asociada'] : null;
         });
 
         print('\nEmpresas obtenidas:');
@@ -277,6 +228,26 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       print('Error de conexión en sendRequest: $e');
     }
+  }
+
+  void _showAlertDialog(BuildContext context, String message) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Atención'),
+          content: Text(message),
+          actions: [
+            TextButton(
+              child: Text('OK'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -295,31 +266,9 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Se quitan las banderas de idioma
               Padding(
-                padding: const EdgeInsets.only(top: 40, right: 20),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    IconButton(
-                      icon: Image.asset('assets/flag_arg.png'),
-                      iconSize: 40,
-                      onPressed: () => _changeLanguage('es'),
-                    ),
-                    IconButton(
-                      icon: Image.asset('assets/flag_us.png'),
-                      iconSize: 40,
-                      onPressed: () => _changeLanguage('en'),
-                    ),
-                    IconButton(
-                      icon: Image.asset('assets/flag_br.png'),
-                      iconSize: 40,
-                      onPressed: () => _changeLanguage('pt'),
-                    ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 20),
+                padding: const EdgeInsets.only(bottom: 20, top: 60),
                 child: Image.asset(
                   'assets/infocontrol_logo.png',
                   width: 165,
@@ -416,8 +365,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           getText('forgotPassword'),
                           style: TextStyle(
                             fontFamily: 'Montserrat',
-                            color: Colors.blue, 
-                            ),
+                            color: Colors.blue,
+                          ),
                         ),
                       ),
                     ),
@@ -496,7 +445,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
-                    SizedBox(height: 40), // Espacio adicional al final para el scroll
+                    SizedBox(height: 40),
                   ],
                 ),
               ),
