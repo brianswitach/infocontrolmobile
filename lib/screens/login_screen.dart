@@ -1,11 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import './home_screen.dart';
-import 'package:http/http.dart' as http;
-import 'dart:io';
-import './hive_helper.dart';
+import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:dio/dio.dart';
+import 'package:cookie_jar/cookie_jar.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -16,18 +17,26 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   String bearerToken = "";
-  String _language = 'es'; // Se mantiene solo idioma español
+  String _language = 'es'; // Solo idioma español
   bool _showPendingMessages = false;
   List<Map<String, dynamic>> empresas = [];
   String? empresaNombre;
   String? empresaId;
   final ScrollController _scrollController = ScrollController();
 
+  late Dio dio;
+  late CookieJar cookieJar;
+
   @override
   void initState() {
     super.initState();
     _usernameController.text = '';
     _passwordController.text = '';
+
+    // Configuración de Dio + CookieJar
+    cookieJar = CookieJar();
+    dio = Dio();
+    dio.interceptors.add(CookieManager(cookieJar));
   }
 
   @override
@@ -46,7 +55,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String getText(String key) {
-    // Como solo queda español, utilizamos directamente el texto en español
     final Map<String, String> _spanishText = {
       'login': 'Iniciar sesión',
       'subtitle': 'Complete con sus datos para continuar',
@@ -87,63 +95,33 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else {
-          print('No hay conexión y no hay datos locales disponibles.');
           _showAlertDialog(context, 'No hay conexión y no hay datos locales disponibles.');
         }
         return;
       }
 
-      print('Realizando solicitud de login a: $loginUrl');
-      print('Headers de la solicitud:');
-      print({
-        'Content-Type': 'application/json',
-        'Authorization': basicAuth,
-        'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
-      });
-      print('Cuerpo de la solicitud:');
-      print(jsonEncode({
-        'username': username,
-        'password': password,
-      }));
-
-      final loginResponse = await http.post(
-        Uri.parse(loginUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': basicAuth,
-          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
-        },
-        body: jsonEncode({
+      final loginResponse = await dio.post(
+        loginUrl,
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': basicAuth,
+          },
+        ),
+        data: jsonEncode({
           'username': username,
           'password': password,
         }),
       );
 
-      print('\nRespuesta del servidor:');
-      print('Código de estado: ${loginResponse.statusCode}');
-      print('Headers de respuesta:');
-      loginResponse.headers.forEach((key, value) {
-        print('$key: $value');
-      });
-      print('\nCuerpo de la respuesta:');
-      print(loginResponse.body);
-      
-      try {
-        print('\nRespuesta JSON parseada:');
-        final parsedJson = jsonDecode(loginResponse.body);
-        print(JsonEncoder.withIndent('  ').convert(parsedJson));
-      } catch (e) {
-        print('\nError al parsear JSON: $e');
-      }
+      final statusCode = loginResponse.statusCode;
+      final responseData = loginResponse.data;
 
-      if (loginResponse.statusCode == 200) {
-        final loginData = jsonDecode(loginResponse.body);
-        bearerToken = loginData['data']['Bearer'];
+      if (statusCode == 200) {
+        bearerToken = responseData['data']['Bearer'];
         setState(() {
           _showPendingMessages = true;
         });
-
-        print('\nToken obtenido: $bearerToken');
 
         await sendRequest();
 
@@ -158,15 +136,16 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         );
-      } else if (loginResponse.statusCode == 404) {
-        // Mostrar alerta en el medio de la pantalla
+      } else if (statusCode == 404) {
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       } else {
-        // Aquí cambia el texto del error
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       }
+    } on DioException catch (e) {
+      // Error de red o de la solicitud
+      _showAlertDialog(context, 'Error de conexión en login');
     } catch (e) {
-      print('Error de conexión en login: $e');
+      // Otro tipo de error
       _showAlertDialog(context, 'Error de conexión en login');
     }
   }
@@ -175,42 +154,18 @@ class _LoginScreenState extends State<LoginScreen> {
     String listarUrl = "https://www.infocontrol.tech/web/api/mobile/empresas/listar";
 
     try {
-      print('\nRealizando solicitud de empresas a: $listarUrl');
-      print('Headers de la solicitud:');
-      print({
-        HttpHeaders.contentTypeHeader: "application/json",
-        HttpHeaders.authorizationHeader: "Bearer $bearerToken",
-        'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
-      });
-
-      final response = await http.get(
-        Uri.parse(listarUrl),
-        headers: {
-          HttpHeaders.contentTypeHeader: "application/json",
-          HttpHeaders.authorizationHeader: "Bearer $bearerToken",
-          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
-        },
+      final response = await dio.get(
+        listarUrl,
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $bearerToken',
+          },
+        ),
       );
 
-      print('\nRespuesta del servidor (listar empresas):');
-      print('Código de estado: ${response.statusCode}');
-      print('Headers de respuesta:');
-      response.headers.forEach((key, value) {
-        print('$key: $value');
-      });
-      print('\nCuerpo de la respuesta:');
-      print(response.body);
-      
-      try {
-        print('\nRespuesta JSON parseada:');
-        final parsedJson = jsonDecode(response.body);
-        print(JsonEncoder.withIndent('  ').convert(parsedJson));
-      } catch (e) {
-        print('\nError al parsear JSON: $e');
-      }
-
       if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
+        final responseData = response.data;
         empresas = List<Map<String, dynamic>>.from(responseData['data']);
 
         await HiveHelper.insertEmpresas(empresas);
@@ -219,14 +174,13 @@ class _LoginScreenState extends State<LoginScreen> {
           empresaNombre = empresas.isNotEmpty ? empresas[0]['nombre'] : null;
           empresaId = empresas.isNotEmpty ? empresas[0]['id_empresa_asociada'] : null;
         });
-
-        print('\nEmpresas obtenidas:');
-        print(JsonEncoder.withIndent('  ').convert(empresas));
       } else {
         print('Error en sendRequest: ${response.statusCode}');
       }
-    } catch (e) {
+    } on DioException catch (e) {
       print('Error de conexión en sendRequest: $e');
+    } catch (e) {
+      print('Error inesperado en sendRequest: $e');
     }
   }
 
@@ -266,7 +220,6 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Se quitan las banderas de idioma
               Padding(
                 padding: const EdgeInsets.only(bottom: 20, top: 60),
                 child: Image.asset(
@@ -310,14 +263,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         fillColor: Colors.grey[200],
                         labelText: getText('userField'),
                         labelStyle: TextStyle(
-                            fontFamily: 'Montserrat',
-                            color: Colors.black54),
+                          fontFamily: 'Montserrat',
+                          color: Colors.black54,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide.none,
                         ),
-                        prefixIcon:
-                            Icon(Icons.person, color: Colors.black54),
+                        prefixIcon: Icon(Icons.person, color: Colors.black54),
                       ),
                     ),
                     SizedBox(height: 16),
@@ -328,14 +281,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         fillColor: Colors.grey[200],
                         labelText: getText('passwordField'),
                         labelStyle: TextStyle(
-                            fontFamily: 'Montserrat',
-                            color: Colors.black54),
+                          fontFamily: 'Montserrat',
+                          color: Colors.black54,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide.none,
                         ),
-                        prefixIcon:
-                            Icon(Icons.lock, color: Colors.black54),
+                        prefixIcon: Icon(Icons.lock, color: Colors.black54),
                       ),
                       obscureText: true,
                     ),
@@ -351,10 +304,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           },
                         ),
                         SizedBox(width: 8),
-                        Text(getText('rememberData'),
-                            style: TextStyle(
-                                fontFamily: 'Montserrat',
-                                color: Colors.black54)),
+                        Text(
+                          getText('rememberData'),
+                          style: TextStyle(
+                            fontFamily: 'Montserrat',
+                            color: Colors.black54,
+                          ),
+                        ),
                       ],
                     ),
                     Align(
@@ -375,7 +331,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       onPressed: () => login(context),
                       style: ElevatedButton.styleFrom(
                         padding: EdgeInsets.symmetric(
-                            horizontal: 40, vertical: 12),
+                          horizontal: 40,
+                          vertical: 12,
+                        ),
                         backgroundColor: Colors.blue,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),

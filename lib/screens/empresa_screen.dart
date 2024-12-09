@@ -3,6 +3,9 @@ import './lupa_empresa.dart';
 import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import './home_screen.dart';
+import 'package:dio/dio.dart';
+import 'package:cookie_jar/cookie_jar.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 class EmpresaScreen extends StatefulWidget {
   final String empresaId;
@@ -25,24 +28,32 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
   String empresaInicial = '';
   bool _isLoading = true;
 
+  late Dio dio;
+  late CookieJar cookieJar;
+
   @override
   void initState() {
     super.initState();
+    // Configurar Dio con manejo automático de cookies
+    cookieJar = CookieJar();
+    dio = Dio();
+    dio.interceptors.add(CookieManager(cookieJar));
+
     _loadEmpresaData();
   }
 
   Future<void> _loadEmpresaData() async {
-    // Obtener los datos de la empresa desde widget.empresaData
     Map<String, dynamic> empresaData = widget.empresaData;
 
     if (empresaData.isNotEmpty) {
       setState(() {
         empresaNombre = empresaData['nombre'] ?? 'Nombre de la empresa';
-        empresaInicial = empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
+        empresaInicial =
+            empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
       });
     }
 
-    // Obtener instalaciones desde Hive
+    // Obtener instalaciones desde Hive (no se hace solicitud http, pero dio ya está configurado para cookies)
     List<Map<String, dynamic>> instalacionesData =
         HiveHelper.getInstalaciones(widget.empresaId);
 
@@ -150,8 +161,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               Center(
                 child: OutlinedButton(
                   onPressed: () {
-                    // Al presionar "Seleccionar empresa" se abre home_screen.dart
-                    // Aquí utilizamos algunos valores por defecto para username, password y empresas
+                    // Navegar a HomeScreen con manejo automático de cookies ya configurado en HomeScreen
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(
@@ -170,7 +180,8 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    padding:
+                        EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   ),
                   child: Text(
                     'Seleccionar empresa',

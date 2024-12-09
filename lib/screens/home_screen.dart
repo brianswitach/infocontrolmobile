@@ -1,11 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import './empresa_screen.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import './lupa_empresa.dart';
-import 'dart:async';
 import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:dio/dio.dart';
+import 'package:cookie_jar/cookie_jar.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
@@ -36,12 +38,20 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> empresasFiltradas = [];
 
+  late Dio dio;
+  late CookieJar cookieJar;
+
   @override
   void initState() {
     super.initState();
     bearerToken = widget.bearerToken;
     empresas = widget.empresas;
     empresasFiltradas = widget.empresas;
+
+    cookieJar = CookieJar();
+    dio = Dio();
+    dio.interceptors.add(CookieManager(cookieJar));
+
     _startTokenRefreshTimer();
     _initializeData();
     _setupConnectivityListener();
@@ -141,21 +151,22 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      final response = await http.post(
-        Uri.parse("https://www.infocontrol.tech/web/api/web/workers/login"),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
-          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
-        },
-        body: jsonEncode({
+      final response = await dio.post(
+        "https://www.infocontrol.tech/web/api/web/workers/login",
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
+          },
+        ),
+        data: jsonEncode({
           'username': widget.username,
           'password': widget.password,
         }),
       );
 
       if (response.statusCode == 200) {
-        final loginData = jsonDecode(response.body);
+        final loginData = response.data;
         String newToken = loginData['data']['Bearer'];
         
         if (mounted) {
@@ -167,6 +178,9 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         throw Exception('Error al actualizar el token: ${response.statusCode}');
       }
+    } on DioException catch (e) {
+      print('Error al refrescar el token: $e');
+      _showErrorSnackBar('Error al refrescar el token');
     } catch (e) {
       print('Error al refrescar el token: $e');
       _showErrorSnackBar('Error al refrescar el token');
@@ -193,19 +207,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _updateDataFromServer() async {
     try {
-      final response = await http.get(
-        Uri.parse("https://www.infocontrol.tech/web/api/mobile/empresas/listar"),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $bearerToken',
-          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
-        },
+      final response = await dio.get(
+        "https://www.infocontrol.tech/web/api/mobile/empresas/listar",
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $bearerToken',
+          },
+        ),
       );
 
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
+        final responseData = response.data;
         List<Map<String, dynamic>> empresasData = List<Map<String, dynamic>>.from(responseData['data']);
         Set<String> gruposUnicos = {};
         List<Map<String, dynamic>> gruposData = [];
@@ -247,6 +262,9 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         throw Exception('Server error: ${response.statusCode}');
       }
+    } on DioException catch (e) {
+      print('Error updating server data: $e');
+      throw Exception('Error actualizando datos del servidor');
     } catch (e) {
       print('Error updating server data: $e');
       throw Exception('Error actualizando datos del servidor');
@@ -255,18 +273,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
     try {
-      final response = await http.get(
-        Uri.parse("https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId"),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $bearerToken',
-          'auth-type': 'no-auth',
-          'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
-        },
+      final response = await dio.get(
+        "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $bearerToken',
+            'auth-type': 'no-auth',
+          },
+        ),
       );
 
       if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
+        final responseData = response.data;
         List<Map<String, dynamic>> instalaciones = [];
         
         if (responseData['data']['instalaciones'] != null) {
@@ -282,6 +301,9 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         throw Exception('Error al obtener instalaciones: ${response.statusCode}');
       }
+    } on DioException catch (e) {
+      print('Error fetching instalaciones: $e');
+      throw Exception('Error obteniendo instalaciones');
     } catch (e) {
       print('Error fetching instalaciones: $e');
       throw Exception('Error obteniendo instalaciones');
@@ -304,7 +326,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Se han removido el drawer y los iconos del AppBar
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -501,7 +522,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 backgroundColor: Color(0xFF2a3666),
                                 radius: 15,
                                 child: Text(
-                                  grupo['nombre'].toString().isNotEmpty 
+                                  grupo['nombre'].toString().isNotEmpty
                                       ? grupo['nombre'][0].toUpperCase()
                                       : 'G',
                                   style: TextStyle(

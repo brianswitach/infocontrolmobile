@@ -6,6 +6,10 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:math';
 
+import 'package:dio/dio.dart';
+import 'package:cookie_jar/cookie_jar.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
   final String bearerToken;
@@ -37,20 +41,25 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   bool isLoadingContractors = false;
   final MobileScannerController controladorCamara = MobileScannerController();
 
-  // Controladores para los campos de texto
   final TextEditingController personalIdController = TextEditingController();
   final TextEditingController dominioController = TextEditingController();
 
-  bool qrScanned = false; // Indica si ya se escaneó un QR
-  
-  // Variable para almacenar el resultado de la habilitación
-  bool? resultadoHabilitacion; // null: no mostrar nada, true: habilitado, false: inhabilitado
+  bool qrScanned = false; 
+  bool? resultadoHabilitacion; 
+
+  late Dio dio;
+  late CookieJar cookieJar;
 
   @override
   void initState() {
     super.initState();
+
+    // Configurar Dio con manejo automático de cookies
+    cookieJar = CookieJar();
+    dio = Dio();
+    dio.interceptors.add(CookieManager(cookieJar));
+
     obtenerEmpleados().then((_) {
-      // Si la pantalla se recargó para volver a escanear (openScannerOnInit = true), abrir la cámara
       if (widget.openScannerOnInit) {
         _mostrarEscanerQR();
       }
@@ -120,12 +129,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                           final dominio = qrData['dominio'] ?? 'Dominio no disponible';
                           dominioController.text = dominio;
                         }
-                        // Marca que se escaneó un QR
                         setState(() {
                           qrScanned = true;
                         });
                       } catch (e) {
-                        // No mostramos cartel ni nada
+                        // No se hace nada si falla el parseo.
                       }
                     }
                   },
@@ -166,18 +174,20 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           'id_empresas': widget.idEmpresaAsociada,
         });
 
-        final response = await http.get(
-          url,
-          headers: {
-            'Authorization': 'Bearer ${widget.bearerToken}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Cookie': 'ci_session_infocontrolweb1=4ohde8tg4j314flf237b2v7c6l1u6a1i; cookie_sistema=9403e26ba93184a3aafc6dd61404daed'
-          },
+        // Usamos Dio en lugar de http para las solicitudes
+        final response = await dio.get(
+          url.toString(),
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer ${widget.bearerToken}',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+          ),
         );
 
         if (response.statusCode == 200) {
-          final responseData = jsonDecode(response.body);
+          final responseData = response.data;
           setState(() {
             empleados = responseData['data'] ?? [];
             isLoading = false;
@@ -194,6 +204,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
             ),
           );
         }
+      } on DioException catch (e) {
+        setState(() {
+          isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error en la solicitud: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       } catch (e) {
         setState(() {
           isLoading = false;
@@ -232,7 +252,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           bearerToken: widget.bearerToken,
           idEmpresaAsociada: widget.idEmpresaAsociada,
           empresaId: widget.empresaId,
-          openScannerOnInit: true, // Esto hace que se abra automáticamente la cámara al recargar.
+          openScannerOnInit: true,
         ),
       ),
     );
@@ -250,7 +270,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    // Al tener informacion, determinamos habilitación al azar
     setState(() {
       resultadoHabilitacion = Random().nextBool();
     });
@@ -268,7 +287,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    // Al tener informacion, determinamos habilitación al azar
     setState(() {
       resultadoHabilitacion = Random().nextBool();
     });
@@ -549,8 +567,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ],
                           ),
                           const SizedBox(height: 16),
-                          
-                          // Aquí mostramos el resultado si existe
                           if (resultadoHabilitacion != null) ...[
                             const SizedBox(height: 16),
                             Container(
@@ -578,7 +594,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                 width: double.infinity,
                                 child: ElevatedButton(
                                   onPressed: () {
-                                    // Acción al presionar el botón "Marcar ingreso con excepción"
+                                    // Acción al presionar "Marcar ingreso con excepción"
                                   },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[300],
@@ -599,8 +615,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               ),
                             ],
                           ],
-
-                          // Botón de QR
                           const SizedBox(height: 16),
                           SizedBox(
                             width: double.infinity,
