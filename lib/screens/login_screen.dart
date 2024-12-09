@@ -72,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> login(BuildContext context) async {
-    String loginUrl = "https://www.infocontrol.tech/web/api/web/workers/login";
+    String loginUrl = "https://www.infocontrol.tech/web/api/mobile/service/login"; 
     String username = _usernameController.text;
     String password = _passwordController.text;
     String basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
