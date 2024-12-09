@@ -53,7 +53,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
       });
     }
 
-    // Obtener instalaciones desde Hive (no se hace solicitud http, pero dio ya está configurado para cookies)
+    // Obtener instalaciones desde Hive (ya fueron cargadas en HomeScreen)
     List<Map<String, dynamic>> instalacionesData =
         HiveHelper.getInstalaciones(widget.empresaId);
 
@@ -161,7 +161,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               Center(
                 child: OutlinedButton(
                   onPressed: () {
-                    // Navegar a HomeScreen con manejo automático de cookies ya configurado en HomeScreen
+                    // Navegar a HomeScreen
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(

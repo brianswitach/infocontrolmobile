@@ -45,24 +45,34 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     bearerToken = widget.bearerToken;
-    empresas = widget.empresas;
-    empresasFiltradas = widget.empresas;
-
+    empresas = []; 
+    empresasFiltradas = [];
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
     _startTokenRefreshTimer();
-    _initializeData();
     _setupConnectivityListener();
+
+    // Ya no cargamos primero local e inmediatamente mostramos,
+    // ahora vamos directo a actualizar desde el servidor
+    _updateDataFromServer();
+
     _searchController.addListener(_onSearchChanged);
   }
 
   void _setupConnectivityListener() {
     Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
       if (result == ConnectivityResult.none) {
-        _loadLocalData();
+        // Sin conexión cargamos locales
+        _loadLocalData().then((_) {
+          setState(() {
+            _filterData();
+            _isLoading = false;
+          });
+        });
       } else {
+        // Con conexión refrescamos token y datos
         _refreshBearerToken();
       }
     });
@@ -77,25 +87,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _filterData() {
-    setState(() {
-      if (_searchQuery.isEmpty) {
-        empresasFiltradas = List.from(empresas);
-        gruposFiltrados = List.from(grupos);
-        return;
-      }
-      empresasFiltradas = empresas.where((empresa) {
-        return empresa['nombre']
-            .toString()
-            .toLowerCase()
-            .startsWith(_searchQuery);
-      }).toList();
-      gruposFiltrados = grupos.where((grupo) {
-        return grupo['nombre']
-            .toString()
-            .toLowerCase()
-            .startsWith(_searchQuery);
-      }).toList();
-    });
+    if (_searchQuery.isEmpty) {
+      empresasFiltradas = List.from(empresas);
+      gruposFiltrados = List.from(grupos);
+      return;
+    }
+    empresasFiltradas = empresas.where((empresa) {
+      return empresa['nombre']
+          .toString()
+          .toLowerCase()
+          .startsWith(_searchQuery);
+    }).toList();
+    gruposFiltrados = grupos.where((grupo) {
+      return grupo['nombre']
+          .toString()
+          .toLowerCase()
+          .startsWith(_searchQuery);
+    }).toList();
   }
 
   @override
@@ -103,36 +111,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _refreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
-  }
-
-  Future<void> _initializeData() async {
-    setState(() => _isLoading = true);
-    try {
-      await _loadLocalData();
-      var connectivityResult = await Connectivity().checkConnectivity();
-      if (connectivityResult != ConnectivityResult.none) {
-        await _updateDataFromServer();
-      }
-    } catch (e) {
-      print('Error initializing data: $e');
-      if (empresas.isEmpty) {
-        _showErrorSnackBar('Error cargando datos: $e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _filterData();
-        });
-      }
-    }
-  }
-
-  void _showErrorSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
   }
 
   void _startTokenRefreshTimer() {
@@ -152,11 +130,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final response = await dio.post(
-        "https://www.infocontrol.tech/web/api/web/workers/login",
+        "https://www.infocontrol.tech/web/api/mobile/service/login",
         options: Options(
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
+            'Authorization':
+                'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
           },
         ),
         data: jsonEncode({
@@ -168,7 +147,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final loginData = response.data;
         String newToken = loginData['data']['Bearer'];
-        
+
         if (mounted) {
           setState(() {
             bearerToken = newToken;
@@ -187,25 +166,39 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   Future<void> _loadLocalData() async {
     try {
       List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
       List<Map<String, dynamic>> localGrupos = HiveHelper.getGrupos();
-      
-      if (mounted) {
-        setState(() {
-          empresas = localEmpresas;
-          grupos = localGrupos;
-          gruposFiltrados = localGrupos;
-        });
-      }
+
+      empresas = localEmpresas;
+      grupos = localGrupos;
+      gruposFiltrados = localGrupos;
+      empresasFiltradas = localEmpresas;
     } catch (e) {
       print('Error loading local data: $e');
       throw Exception('Error cargando datos locales');
     }
   }
 
+  /// Ahora la estrategia cambió:
+  /// 1. Obtenemos la lista de empresas del servidor.
+  /// 2. Por cada empresa, obtenemos sus instalaciones.
+  /// 3. Insertamos la empresa e instalaciones en Hive.
+  /// 4. Actualizamos el estado y así la empresa aparece en pantalla.
+  /// De este modo, cuando la empresa aparece en la lista, ya tiene instalaciones cargadas.
   Future<void> _updateDataFromServer() async {
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
       final response = await dio.get(
         "https://www.infocontrol.tech/web/api/mobile/empresas/listar",
@@ -221,14 +214,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final responseData = response.data;
-        List<Map<String, dynamic>> empresasData = List<Map<String, dynamic>>.from(responseData['data']);
+        List<Map<String, dynamic>> empresasData =
+            List<Map<String, dynamic>>.from(responseData['data']);
         Set<String> gruposUnicos = {};
         List<Map<String, dynamic>> gruposData = [];
-        
+
+        empresas.clear();
+        empresasFiltradas.clear();
+        grupos.clear();
+        gruposFiltrados.clear();
+
+        // Procesar grupos
         for (var empresa in empresasData) {
           String? grupoNombre = empresa['grupo'];
           String? grupoId = empresa['id_grupos'];
-          
+
           if (grupoNombre != null && grupoId != null && !gruposUnicos.contains(grupoId)) {
             gruposUnicos.add(grupoId);
             gruposData.add({
@@ -238,27 +238,30 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        await HiveHelper.insertEmpresas(empresasData);
         await HiveHelper.insertGrupos(gruposData);
+        grupos = gruposData;
+        gruposFiltrados = gruposData;
 
-        List<Future<void>> instalacionesFutures = [];
+        // Ahora cargamos las instalaciones empresa por empresa
+        // Para cada empresa, cargamos sus instalaciones del server,
+        // las guardamos en Hive y luego la añadimos a la lista
+        // Esto permitirá que la empresa aparezca ya con instalaciones en Hive
         for (var empresa in empresasData) {
-          instalacionesFutures.add(
-            _fetchAndStoreInstalaciones(empresa['id_empresa_asociada'])
-              .catchError((e) => print('Error fetching instalaciones: $e'))
-          );
-        }
-        await Future.wait(instalacionesFutures);
+          await _fetchAndStoreInstalaciones(empresa['id_empresa_asociada']);
 
-        if (mounted) {
+          // Insertamos la empresa en Hive luego de tener instalaciones
+          await HiveHelper.insertEmpresas([empresa]);
+
+          // Añadimos la empresa a la lista local y actualizamos el estado
+          empresas.add(empresa);
+          empresasFiltradas.add(empresa);
+
           setState(() {
-            empresas = empresasData;
-            empresasFiltradas = empresasData;
-            grupos = gruposData;
-            gruposFiltrados = gruposData;
+            _isLoading = false; 
             _filterData();
           });
         }
+
       } else {
         throw Exception('Server error: ${response.statusCode}');
       }
@@ -287,13 +290,13 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final responseData = response.data;
         List<Map<String, dynamic>> instalaciones = [];
-        
+
         if (responseData['data']['instalaciones'] != null) {
           instalaciones = List<Map<String, dynamic>>.from(
             responseData['data']['instalaciones'].map((instalacion) => {
-              'id_instalacion': instalacion['id_instalacion'],
-              'nombre': instalacion['nombre'],
-            })
+                  'id_instalacion': instalacion['id_instalacion'],
+                  'nombre': instalacion['nombre'],
+                }),
           );
         }
 
@@ -331,7 +334,7 @@ class _HomeScreenState extends State<HomeScreen> {
         elevation: 0,
         title: Container(),
       ),
-      body: _isLoading
+      body: _isLoading && empresas.isEmpty
           ? Center(
               child: CircularProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2a3666)),
