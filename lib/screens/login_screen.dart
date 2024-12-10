@@ -47,8 +47,8 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _launchURL() async {
-    final Uri url = Uri.parse('https://www.infocontrolweb.com/inteligencia_artificial');
+  Future<void> _launchURL(String urlString) async {
+    final Uri url = Uri.parse(urlString);
     if (!await launchUrl(url)) {
       throw Exception('Could not launch $url');
     }
@@ -72,6 +72,37 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> login(BuildContext context) async {
+    // Mostrar el diálogo de "Cargando..." sin subrayados
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          padding: EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text(
+                'Cargando...',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
     String loginUrl = "https://www.infocontrol.tech/web/api/mobile/service/login"; 
     String username = _usernameController.text;
     String password = _passwordController.text;
@@ -81,6 +112,9 @@ class _LoginScreenState extends State<LoginScreen> {
       var connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
         List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
+
+        // Cerrar el dialogo de cargando
+        Navigator.pop(context);
 
         if (localEmpresas.isNotEmpty) {
           Navigator.push(
@@ -125,6 +159,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
         await sendRequest();
 
+        // Cerrar el dialogo de cargando antes de navegar
+        Navigator.pop(context);
+
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -137,15 +174,21 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       } else if (statusCode == 404) {
+        // Cerrar el dialogo de cargando
+        Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       } else {
+        // Cerrar el dialogo de cargando
+        Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       }
     } on DioException catch (e) {
-      // Error de red o de la solicitud
+      // Cerrar el dialogo de cargando
+      Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     } catch (e) {
-      // Otro tipo de error
+      // Cerrar el dialogo de cargando
+      Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     }
   }
@@ -204,6 +247,11 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  void _launchForgotPassword() async {
+    final url = 'https://www.infocontrol.tech/web/usuarios/recuperar_contrasena?lg=arg';
+    await _launchURL(url);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -244,6 +292,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         fontSize: 24,
                         fontWeight: FontWeight.w600,
                         color: Colors.black,
+                        decoration: TextDecoration.none,
                       ),
                     ),
                     SizedBox(height: 8),
@@ -253,6 +302,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         fontFamily: 'Montserrat',
                         fontSize: 16,
                         color: Colors.black54,
+                        decoration: TextDecoration.none,
                       ),
                     ),
                     SizedBox(height: 16),
@@ -309,6 +359,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: TextStyle(
                             fontFamily: 'Montserrat',
                             color: Colors.black54,
+                            decoration: TextDecoration.none,
                           ),
                         ),
                       ],
@@ -316,12 +367,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton(
-                        onPressed: () {},
+                        onPressed: _launchForgotPassword,
                         child: Text(
                           getText('forgotPassword'),
                           style: TextStyle(
                             fontFamily: 'Montserrat',
                             color: Colors.blue,
+                            decoration: TextDecoration.none,
                           ),
                         ),
                       ),
@@ -345,6 +397,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           fontFamily: 'Montserrat',
                           fontSize: 16,
                           color: Colors.white,
+                          decoration: TextDecoration.none,
                         ),
                       ),
                     ),
@@ -366,6 +419,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
+                        decoration: TextDecoration.none,
                       ),
                     ),
                     SizedBox(height: 8),
@@ -375,12 +429,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         fontFamily: 'Montserrat',
                         fontSize: 16,
                         color: Colors.white70,
+                        decoration: TextDecoration.none,
                       ),
                     ),
                     SizedBox(height: 20),
                     Center(
                       child: ElevatedButton(
-                        onPressed: _launchURL,
+                        onPressed: () => _launchURL('https://www.infocontrolweb.com/inteligencia_artificial'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Color(0xFF3D77E9),
                           foregroundColor: Colors.white,
@@ -399,6 +454,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             fontFamily: 'Montserrat',
                             fontSize: 16,
                             fontWeight: FontWeight.w500,
+                            decoration: TextDecoration.none,
                           ),
                         ),
                       ),

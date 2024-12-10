@@ -38,18 +38,52 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
-    _loadEmpresaData();
+
+    Map<String, dynamic> empresaData = widget.empresaData;
+    if (empresaData.isNotEmpty) {
+      empresaNombre = empresaData['nombre'] ?? 'Nombre de la empresa';
+      empresaInicial = empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showLoadingDialog();
+      _loadEmpresaData();
+    });
+  }
+
+  Future<void> _showLoadingDialog() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          padding: EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text(
+                'Cargando...',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadEmpresaData() async {
-    Map<String, dynamic> empresaData = widget.empresaData;
-    if (empresaData.isNotEmpty) {
-      setState(() {
-        empresaNombre = empresaData['nombre'] ?? 'Nombre de la empresa';
-        empresaInicial = empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
-      });
-    }
-
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult != ConnectivityResult.none) {
       await _fetchInstalacionesFromServer();
@@ -91,6 +125,10 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
           instalaciones = instalacionesData;
           _isLoading = false;
         });
+
+        // Cerrar el dialogo "Cargando..."
+        Navigator.pop(context);
+
       } else {
         _loadInstalacionesFromHive();
       }
@@ -109,10 +147,12 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
       instalaciones = instalacionesData;
       _isLoading = false;
     });
+
+    // Cerrar el dialogo "Cargando..."
+    Navigator.pop(context);
   }
 
   Widget _buildTipoClienteBadge(String tipoCliente) {
-    // tipo_cliente == 'directo' -> Integral, si no Renting
     final text = tipoCliente == 'directo' ? 'Integral' : 'Renting';
     return Container(
       decoration: BoxDecoration(
@@ -127,6 +167,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
           fontSize: 14,
           color: Color(0xFF2a3666),
           fontWeight: FontWeight.w500,
+          decoration: TextDecoration.none,
         ),
       ),
     );
@@ -134,7 +175,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    String tipoCliente = widget.empresaData['tipo_cliente'] ?? ''; // directo o indirecto
+    String tipoCliente = widget.empresaData['tipo_cliente'] ?? '';
 
     return Scaffold(
       appBar: PreferredSize(
@@ -175,6 +216,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
+                  decoration: TextDecoration.none,
                 ),
               ),
             ),
@@ -210,6 +252,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                           fontSize: 24,
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
+                          decoration: TextDecoration.none,
                         ),
                       ),
                     ),
@@ -221,6 +264,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                           fontFamily: 'Montserrat',
                           fontSize: 20,
                           color: Color(0xFF3d77e9),
+                          decoration: TextDecoration.none,
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -258,6 +302,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                       fontFamily: 'Montserrat',
                       fontSize: 16,
                       color: Colors.white,
+                      decoration: TextDecoration.none,
                     ),
                   ),
                 ),
@@ -287,6 +332,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                       color: Color(0xFF9dbdfd),
                       fontFamily: 'Montserrat',
                       fontSize: 16,
+                      decoration: TextDecoration.none,
                     ),
                   ),
                 ],
@@ -305,17 +351,19 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF232e5f),
+                    decoration: TextDecoration.none,
                   ),
                 ),
-                // Mostrar también el badge aquí
-                _buildTipoClienteBadge(tipoCliente),
+                _buildTipoClienteBadge(widget.empresaData['tipo_cliente'] ?? ''),
               ],
             ),
             SizedBox(height: 30),
             Expanded(
+              // Si _isLoading es true, no mostramos nada (el dialogo se encarga del loading)
+              // Si _isLoading es false, mostramos segun si hay instalaciones o no.
               child: _isLoading
-                  ? Center(child: CircularProgressIndicator())
-                  : instalaciones.isNotEmpty
+                  ? Container() // No mostrar nada, ya está el dialogo "Cargando..."
+                  : (instalaciones.isNotEmpty
                       ? ListView.builder(
                           itemCount: instalaciones.length,
                           itemBuilder: (context, index) {
@@ -327,12 +375,12 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                instalaciones[index]['nombre'] ??
-                                    'Nombre de la instalación',
+                                instalaciones[index]['nombre'] ?? 'Nombre de la instalación',
                                 style: TextStyle(
                                   fontFamily: 'Montserrat',
                                   fontSize: 14,
                                   color: Colors.black,
+                                  decoration: TextDecoration.none,
                                 ),
                               ),
                             );
@@ -345,9 +393,10 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                               fontFamily: 'Montserrat',
                               fontSize: 16,
                               color: Colors.black,
+                              decoration: TextDecoration.none,
                             ),
                           ),
-                        ),
+                        )),
             ),
           ],
         ),
