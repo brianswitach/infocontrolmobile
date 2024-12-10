@@ -34,12 +34,10 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
   @override
   void initState() {
     super.initState();
-
     // Configurar Dio con manejo automático de cookies
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
-
     _loadEmpresaData();
   }
 
@@ -52,13 +50,10 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
       });
     }
 
-    // Primero intentamos obtener instalaciones desde el servidor (si hay conexión)
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult != ConnectivityResult.none) {
-      // Hay conexión, intentamos cargar instalaciones desde el servidor
       await _fetchInstalacionesFromServer();
     } else {
-      // Sin conexión, cargamos instalaciones locales
       _loadInstalacionesFromHive();
     }
   }
@@ -82,20 +77,14 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
 
         if (responseData['data']['instalaciones'] != null) {
           instalacionesData = List<Map<String, dynamic>>.from(
-            responseData['data']['instalaciones'].map((instalacion) => {
-                  'id_instalacion': instalacion['id_instalaciones'],
-                  'nombre': instalacion['nombre'],
-                  'id_empresas': instalacion['id_empresas'],
-                }),
+            responseData['data']['instalaciones'].map((inst) => Map<String,dynamic>.from(inst))
           );
         }
 
-        // Filtrar por el id_empresas de la empresa actual
         instalacionesData = instalacionesData
-            .where((inst) => inst['id_empresas'] == widget.empresaId)
+            .where((inst) => inst['id_empresas'].toString() == widget.empresaId)
             .toList();
 
-        // Guardar las instalaciones en Hive para acceso offline
         await HiveHelper.insertInstalaciones(widget.empresaId, instalacionesData);
 
         setState(() {
@@ -103,25 +92,18 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
           _isLoading = false;
         });
       } else {
-        // Si el servidor falla, intentar desde Hive
         _loadInstalacionesFromHive();
       }
-    } on DioException catch (e) {
-      print('Error fetching instalaciones from server: $e');
-      // Fallback a Hive
-      _loadInstalacionesFromHive();
     } catch (e) {
-      print('Error fetching instalaciones: $e');
-      // Fallback a Hive
+      print('Error fetching instalaciones from server: $e');
       _loadInstalacionesFromHive();
     }
   }
 
   void _loadInstalacionesFromHive() {
     List<Map<String, dynamic>> instalacionesData = HiveHelper.getInstalaciones(widget.empresaId);
-
-    // Filtrar nuevamente por id_empresas para asegurarnos que sean las correctas
-    instalacionesData = instalacionesData.where((inst) => inst['id_empresas'] == widget.empresaId).toList();
+    instalacionesData = instalacionesData.map((e) => Map<String,dynamic>.from(e)).toList();
+    instalacionesData = instalacionesData.where((inst) => inst['id_empresas'].toString() == widget.empresaId).toList();
 
     setState(() {
       instalaciones = instalacionesData;
@@ -129,8 +111,31 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
     });
   }
 
+  Widget _buildTipoClienteBadge(String tipoCliente) {
+    // tipo_cliente == 'directo' -> Integral, si no Renting
+    final text = tipoCliente == 'directo' ? 'Integral' : 'Renting';
+    return Container(
+      decoration: BoxDecoration(
+        color: Color(0xFFE2EAFB),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontFamily: 'Montserrat',
+          fontSize: 14,
+          color: Color(0xFF2a3666),
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    String tipoCliente = widget.empresaData['tipo_cliente'] ?? ''; // directo o indirecto
+
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
@@ -227,7 +232,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               Center(
                 child: OutlinedButton(
                   onPressed: () {
-                    // Navegar a HomeScreen y resetear stack
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(
@@ -303,10 +307,8 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     color: Color(0xFF232e5f),
                   ),
                 ),
-                Image.asset(
-                  'assets/integral_icon.png',
-                  width: 100,
-                ),
+                // Mostrar también el badge aquí
+                _buildTipoClienteBadge(tipoCliente),
               ],
             ),
             SizedBox(height: 30),

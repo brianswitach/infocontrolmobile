@@ -54,16 +54,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _startTokenRefreshTimer();
     _setupConnectivityListener();
-
     _updateDataFromServer();
-
     _searchController.addListener(_onSearchChanged);
   }
 
   void _setupConnectivityListener() {
     Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
       if (result == ConnectivityResult.none) {
-        // Sin conexión, cargamos datos locales
         _loadLocalData().then((_) {
           setState(() {
             _filterData();
@@ -71,7 +68,6 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         });
       } else {
-        // Con conexión refrescamos token y datos
         _refreshBearerToken();
       }
     });
@@ -156,9 +152,6 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         throw Exception('Error al actualizar el token: ${response.statusCode}');
       }
-    } on DioException catch (e) {
-      print('Error al refrescar el token: $e');
-      _showErrorSnackBar('Error al refrescar el token');
     } catch (e) {
       print('Error al refrescar el token: $e');
       _showErrorSnackBar('Error al refrescar el token');
@@ -175,7 +168,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadLocalData() async {
     try {
       List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
+      localEmpresas = localEmpresas.map((e) => Map<String,dynamic>.from(e)).toList();
+
       List<Map<String, dynamic>> localGrupos = HiveHelper.getGrupos();
+      localGrupos = localGrupos.map((e) => Map<String,dynamic>.from(e)).toList();
 
       empresas = localEmpresas;
       grupos = localGrupos;
@@ -209,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final responseData = response.data;
 
         List<Map<String, dynamic>> empresasData =
-            List<Map<String, dynamic>>.from(responseData['data']);
+            List<Map<String, dynamic>>.from(responseData['data'].map((e) => Map<String,dynamic>.from(e)));
 
         Set<String> gruposUnicos = {};
         List<Map<String, dynamic>> gruposData = [];
@@ -219,11 +215,9 @@ class _HomeScreenState extends State<HomeScreen> {
         grupos.clear();
         gruposFiltrados.clear();
 
-        // Procesar grupos
         for (var empresa in empresasData) {
           String? grupoNombre = empresa['grupo'];
           String? grupoId = empresa['id_grupos'];
-
           if (grupoNombre != null && grupoId != null && !gruposUnicos.contains(grupoId)) {
             gruposUnicos.add(grupoId);
             gruposData.add({
@@ -234,11 +228,13 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         await HiveHelper.insertGrupos(gruposData);
+        gruposData = gruposData.map((g) => Map<String,dynamic>.from(g)).toList();
+
         grupos = gruposData;
         gruposFiltrados = gruposData;
 
-        // Insertar empresas (solo datos generales)
         await HiveHelper.insertEmpresas(empresasData);
+        empresasData = empresasData.map((e) => Map<String,dynamic>.from(e)).toList();
 
         empresas = empresasData;
         empresasFiltradas = empresasData;
@@ -247,22 +243,14 @@ class _HomeScreenState extends State<HomeScreen> {
           _isLoading = false;
           _filterData();
         });
+
+        _prefetchInstallationsInBackground();
       } else {
         throw Exception('Server error: ${response.statusCode}');
       }
-    } on DioException catch (e) {
-      print('Error updating server data: $e');
-      _showErrorSnackBar('Error al actualizar datos del servidor');
-      // Cargar locales si existen
-      await _loadLocalData();
-      setState(() {
-        _isLoading = false;
-        _filterData();
-      });
     } catch (e) {
       print('Error updating server data: $e');
       _showErrorSnackBar('Error al actualizar datos del servidor');
-      // Cargar locales si existen
       await _loadLocalData();
       setState(() {
         _isLoading = false;
@@ -271,9 +259,90 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _prefetchInstallationsInBackground() async {
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      return;
+    }
+
+    List<Map<String, dynamic>> empresasSinInstalaciones = [];
+    for (var empresa in empresas) {
+      String eId = empresa['id_empresas'].toString();
+      List<Map<String, dynamic>> instLocal = HiveHelper.getInstalaciones(eId);
+      instLocal = instLocal.map((ee) => Map<String,dynamic>.from(ee)).toList();
+
+      if (instLocal.isEmpty) {
+        empresasSinInstalaciones.add(empresa);
+      }
+    }
+
+    int batchSize = 5;
+    for (int i = 0; i < empresasSinInstalaciones.length; i += batchSize) {
+      final batch = empresasSinInstalaciones.skip(i).take(batchSize).toList();
+      await Future.wait(batch.map((emp) => _fetchAndStoreInstalaciones(emp['id_empresas'].toString())));
+    }
+  }
+
+  Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      return;
+    }
+
+    try {
+      final response = await dio.get(
+        "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $bearerToken',
+            'auth-type': 'no-auth',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+
+        List<Map<String, dynamic>> instalacionesData = [];
+        if (responseData['data']['instalaciones'] != null) {
+          instalacionesData = List<Map<String, dynamic>>.from(
+            responseData['data']['instalaciones'].map((inst) => Map<String,dynamic>.from(inst))
+          );
+        }
+
+        instalacionesData = instalacionesData.where((inst) => inst['id_empresas'].toString() == empresaId).toList();
+
+        if (instalacionesData.isNotEmpty) {
+          await HiveHelper.insertInstalaciones(empresaId, instalacionesData);
+        }
+      }
+    } catch (e) {
+      print('Error fetching installations in background for empresa $empresaId: $e');
+    }
+  }
+
+  Widget _buildTipoClienteBadge(String tipoCliente) {
+    final text = tipoCliente == 'directo' ? 'Integral' : 'Renting';
+    return Container(
+      decoration: BoxDecoration(
+        color: Color(0xFFE2EAFB),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontFamily: 'Montserrat',
+          fontSize: 11,
+          color: Color(0xFF2a3666),
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
   void navigateToEmpresaScreen(String empresaId, Map<String, dynamic> empresaData) {
-    // Al navegar, en EmpresaScreen se hará la carga lazy de instalaciones,
-    // filtrando por id_empresas dentro de esa pantalla.
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -397,7 +466,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       for (var empresa in empresasFiltradas)
                         GestureDetector(
                           onTap: () {
-                            navigateToEmpresaScreen(empresa['id_empresas'], empresa);
+                            navigateToEmpresaScreen(empresa['id_empresas'].toString(), empresa);
                           },
                           child: Container(
                             margin: EdgeInsets.only(bottom: 12),
@@ -433,10 +502,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                                 SizedBox(width: 10),
-                                Image.asset(
-                                  'assets/integral_icon.png',
-                                  width: 50,
-                                ),
+                                _buildTipoClienteBadge(empresa['tipo_cliente'] ?? ''),
                               ],
                             ),
                           ),
@@ -506,7 +572,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               SizedBox(width: 10),
                               Image.asset(
                                 'assets/integral_icon.png',
-                                width: 50,
+                                width: 30,
                               ),
                             ],
                           ),
