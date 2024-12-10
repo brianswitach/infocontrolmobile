@@ -62,6 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
     Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
       if (result == ConnectivityResult.none) {
         _loadLocalData().then((_) {
+          if (!mounted) return;
           setState(() {
             _filterData();
             _isLoading = false;
@@ -184,6 +185,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _updateDataFromServer() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
@@ -239,10 +241,12 @@ class _HomeScreenState extends State<HomeScreen> {
         empresas = empresasData;
         empresasFiltradas = empresasData;
 
-        setState(() {
-          _isLoading = false;
-          _filterData();
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _filterData();
+          });
+        }
 
         _prefetchInstallationsInBackground();
       } else {
@@ -252,10 +256,12 @@ class _HomeScreenState extends State<HomeScreen> {
       print('Error updating server data: $e');
       _showErrorSnackBar('Error al actualizar datos del servidor');
       await _loadLocalData();
-      setState(() {
-        _isLoading = false;
-        _filterData();
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _filterData();
+        });
+      }
     }
   }
 
@@ -356,6 +362,47 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Nuevo método para crear el avatar de una empresa con la inicial
+  Widget _buildEmpresaAvatar(String? nombreEmpresa) {
+    String inicial = 'E';
+    if (nombreEmpresa != null && nombreEmpresa.isNotEmpty) {
+      inicial = nombreEmpresa[0].toUpperCase();
+    }
+    return CircleAvatar(
+      backgroundColor: Color(0xFF2a3666),
+      radius: 15,
+      child: Text(
+        inicial,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 18,
+          decoration: TextDecoration.none,
+        ),
+      ),
+    );
+  }
+
+  // Nuevo método para crear el avatar de un grupo con la inicial (ya existente)
+  Widget _buildGrupoAvatar(String? nombreGrupo) {
+    String inicial = 'G';
+    if (nombreGrupo != null && nombreGrupo.isNotEmpty) {
+      inicial = nombreGrupo[0].toUpperCase();
+    }
+    return CircleAvatar(
+      backgroundColor: Color(0xFF2a3666),
+      radius: 15,
+      child: Text(
+        inicial,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          decoration: TextDecoration.none,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -430,6 +477,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Checkbox(
                             value: _showPendingMessages,
                             onChanged: (bool? value) {
+                              if (!mounted) return;
                               setState(() {
                                 _showPendingMessages = value ?? false;
                               });
@@ -491,11 +539,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             child: Row(
                               children: [
-                                CircleAvatar(
-                                  backgroundColor: Color(0xFF2a3666),
-                                  radius: 15,
-                                  backgroundImage: AssetImage('assets/company_logo.png'),
-                                ),
+                                // Ahora utilizamos el avatar con la inicial de la empresa
+                                _buildEmpresaAvatar(empresa['nombre']),
                                 SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
@@ -554,20 +599,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           child: Row(
                             children: [
-                              CircleAvatar(
-                                backgroundColor: Color(0xFF2a3666),
-                                radius: 15,
-                                child: Text(
-                                  grupo['nombre'].toString().isNotEmpty
-                                      ? grupo['nombre'][0].toUpperCase()
-                                      : 'G',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    decoration: TextDecoration.none,
-                                  ),
-                                ),
-                              ),
+                              // Avatar con la inicial del grupo
+                              _buildGrupoAvatar(grupo['nombre']),
                               SizedBox(width: 10),
                               Expanded(
                                 child: Text(
@@ -581,10 +614,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                               SizedBox(width: 10),
-                              Image.asset(
-                                'assets/integral_icon.png',
-                                width: 30,
-                              ),
+                              // Se quita el icono integral para los grupos
+                              // Ya no se muestra 'assets/integral_icon.png'
                             ],
                           ),
                         ),
