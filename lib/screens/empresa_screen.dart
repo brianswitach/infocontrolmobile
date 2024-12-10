@@ -8,7 +8,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 class EmpresaScreen extends StatefulWidget {
-  final String empresaId;
+  final String empresaId;  // Este ahora es el id_empresas
   final String bearerToken;
   final Map<String, dynamic> empresaData;
 
@@ -53,9 +53,13 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
       });
     }
 
-    // Obtener instalaciones desde Hive (ya fueron cargadas en HomeScreen)
+    // Obtener instalaciones desde Hive filtrando por id_empresas
     List<Map<String, dynamic>> instalacionesData =
         HiveHelper.getInstalaciones(widget.empresaId);
+
+    // Asegurarnos de que las instalaciones correspondan sólo a esta empresaId
+    // En caso de que HiveHelper devuelva más datos, filtramos aquí:
+    instalacionesData = instalacionesData.where((inst) => inst['id_empresas'] == widget.empresaId).toList();
 
     setState(() {
       instalaciones = instalacionesData;
@@ -82,7 +86,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     builder: (context) => LupaEmpresaScreen(
                       empresaId: widget.empresaId,
                       bearerToken: widget.bearerToken,
-                      idEmpresaAsociada: widget.empresaId,
+                      idEmpresaAsociada: widget.empresaId,  // Aquí usamos el mismo id que id_empresas
                       empresa: widget.empresaData,
                     ),
                   ),
@@ -180,8 +184,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   ),
                   child: Text(
                     'Seleccionar empresa',
@@ -224,7 +227,10 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               ),
             ),
             SizedBox(height: 20),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Text(
                   empresaNombre,
@@ -235,7 +241,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     color: Color(0xFF232e5f),
                   ),
                 ),
-                SizedBox(width: 8),
                 Image.asset(
                   'assets/integral_icon.png',
                   width: 100,

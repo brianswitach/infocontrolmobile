@@ -45,8 +45,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     bearerToken = widget.bearerToken;
-    empresas = []; 
-    empresasFiltradas = [];
+    empresas = widget.empresas;
+    empresasFiltradas = widget.empresas;
+
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
@@ -54,8 +55,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _startTokenRefreshTimer();
     _setupConnectivityListener();
 
-    // Ya no cargamos primero local e inmediatamente mostramos,
-    // ahora vamos directo a actualizar desde el servidor
     _updateDataFromServer();
 
     _searchController.addListener(_onSearchChanged);
@@ -188,12 +187,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Ahora la estrategia cambió:
-  /// 1. Obtenemos la lista de empresas del servidor.
-  /// 2. Por cada empresa, obtenemos sus instalaciones.
-  /// 3. Insertamos la empresa e instalaciones en Hive.
-  /// 4. Actualizamos el estado y así la empresa aparece en pantalla.
-  /// De este modo, cuando la empresa aparece en la lista, ya tiene instalaciones cargadas.
   Future<void> _updateDataFromServer() async {
     setState(() {
       _isLoading = true;
@@ -214,8 +207,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final responseData = response.data;
+
         List<Map<String, dynamic>> empresasData =
             List<Map<String, dynamic>>.from(responseData['data']);
+
         Set<String> gruposUnicos = {};
         List<Map<String, dynamic>> gruposData = [];
 
@@ -242,22 +237,23 @@ class _HomeScreenState extends State<HomeScreen> {
         grupos = gruposData;
         gruposFiltrados = gruposData;
 
-        // Ahora cargamos las instalaciones empresa por empresa
-        // Para cada empresa, cargamos sus instalaciones del server,
-        // las guardamos en Hive y luego la añadimos a la lista
-        // Esto permitirá que la empresa aparezca ya con instalaciones en Hive
+        // Obtener instalaciones por empresa
         for (var empresa in empresasData) {
-          await _fetchAndStoreInstalaciones(empresa['id_empresa_asociada']);
+          // Usaremos 'id_empresas' como identificador principal
+          // para relacionar con instalaciones.
+          final empresaId = empresa['id_empresas'];
 
-          // Insertamos la empresa en Hive luego de tener instalaciones
+          // Pedimos las instalaciones de esta empresa
+          await _fetchAndStoreInstalaciones(empresaId);
+
+          // Guardamos la empresa localmente
           await HiveHelper.insertEmpresas([empresa]);
 
-          // Añadimos la empresa a la lista local y actualizamos el estado
           empresas.add(empresa);
           empresasFiltradas.add(empresa);
 
           setState(() {
-            _isLoading = false; 
+            _isLoading = false;
             _filterData();
           });
         }
@@ -294,12 +290,14 @@ class _HomeScreenState extends State<HomeScreen> {
         if (responseData['data']['instalaciones'] != null) {
           instalaciones = List<Map<String, dynamic>>.from(
             responseData['data']['instalaciones'].map((instalacion) => {
-                  'id_instalacion': instalacion['id_instalacion'],
+                  'id_instalacion': instalacion['id_instalaciones'],
                   'nombre': instalacion['nombre'],
+                  'id_empresas': instalacion['id_empresas'], // Vincula la instalación con la empresa
                 }),
           );
         }
 
+        // Guardar las instalaciones bajo la clave de esta empresa
         await HiveHelper.insertInstalaciones(empresaId, instalaciones);
       } else {
         throw Exception('Error al obtener instalaciones: ${response.statusCode}');
@@ -314,11 +312,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void navigateToEmpresaScreen(String empresaId, Map<String, dynamic> empresaData) {
+    // Ahora pasamos empresaId = empresa['id_empresas'] (no 'id_empresa_asociada')
+    // Para que en EmpresaScreen se filtren las instalaciones de esa empresa
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => EmpresaScreen(
-          empresaId: empresaId,
+          empresaId: empresaData['id_empresas'], // Usamos id_empresas
           bearerToken: bearerToken,
           empresaData: empresaData,
         ),
@@ -437,8 +437,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       for (var empresa in empresasFiltradas)
                         GestureDetector(
                           onTap: () {
-                            navigateToEmpresaScreen(
-                                empresa['id_empresa_asociada'], empresa);
+                            // Llamamos con empresa['id_empresas'] como empresaId
+                            navigateToEmpresaScreen(empresa['id_empresas'], empresa);
                           },
                           child: Container(
                             margin: EdgeInsets.only(bottom: 12),
@@ -460,8 +460,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 CircleAvatar(
                                   backgroundColor: Color(0xFF2a3666),
                                   radius: 15,
-                                  backgroundImage:
-                                      AssetImage('assets/company_logo.png'),
+                                  backgroundImage: AssetImage('assets/company_logo.png'),
                                 ),
                                 SizedBox(width: 10),
                                 Expanded(
