@@ -169,7 +169,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } else {
       try {
         final url = Uri.parse(
-          'https://www.infocontrol.tech/web/api/mobile/empleados/listar',
+          'https://www.infocontrol.tech/web/api/mobile/empleados/listartest',
         ).replace(queryParameters: {
           'id_empresas': widget.idEmpresaAsociada,
         });
