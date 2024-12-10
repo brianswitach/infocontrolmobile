@@ -8,7 +8,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 class EmpresaScreen extends StatefulWidget {
-  final String empresaId;  // Este ahora es el id_empresas
+  final String empresaId;  // id_empresas
   final String bearerToken;
   final Map<String, dynamic> empresaData;
 
@@ -34,6 +34,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
   @override
   void initState() {
     super.initState();
+
     // Configurar Dio con manejo automático de cookies
     cookieJar = CookieJar();
     dio = Dio();
@@ -44,21 +45,82 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
 
   Future<void> _loadEmpresaData() async {
     Map<String, dynamic> empresaData = widget.empresaData;
-
     if (empresaData.isNotEmpty) {
       setState(() {
         empresaNombre = empresaData['nombre'] ?? 'Nombre de la empresa';
-        empresaInicial =
-            empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
+        empresaInicial = empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
       });
     }
 
-    // Obtener instalaciones desde Hive filtrando por id_empresas
-    List<Map<String, dynamic>> instalacionesData =
-        HiveHelper.getInstalaciones(widget.empresaId);
+    // Primero intentamos obtener instalaciones desde el servidor (si hay conexión)
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult != ConnectivityResult.none) {
+      // Hay conexión, intentamos cargar instalaciones desde el servidor
+      await _fetchInstalacionesFromServer();
+    } else {
+      // Sin conexión, cargamos instalaciones locales
+      _loadInstalacionesFromHive();
+    }
+  }
 
-    // Asegurarnos de que las instalaciones correspondan sólo a esta empresaId
-    // En caso de que HiveHelper devuelva más datos, filtramos aquí:
+  Future<void> _fetchInstalacionesFromServer() async {
+    try {
+      final response = await dio.get(
+        "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=${widget.empresaId}",
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ${widget.bearerToken}',
+            'auth-type': 'no-auth',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        List<Map<String, dynamic>> instalacionesData = [];
+
+        if (responseData['data']['instalaciones'] != null) {
+          instalacionesData = List<Map<String, dynamic>>.from(
+            responseData['data']['instalaciones'].map((instalacion) => {
+                  'id_instalacion': instalacion['id_instalaciones'],
+                  'nombre': instalacion['nombre'],
+                  'id_empresas': instalacion['id_empresas'],
+                }),
+          );
+        }
+
+        // Filtrar por el id_empresas de la empresa actual
+        instalacionesData = instalacionesData
+            .where((inst) => inst['id_empresas'] == widget.empresaId)
+            .toList();
+
+        // Guardar las instalaciones en Hive para acceso offline
+        await HiveHelper.insertInstalaciones(widget.empresaId, instalacionesData);
+
+        setState(() {
+          instalaciones = instalacionesData;
+          _isLoading = false;
+        });
+      } else {
+        // Si el servidor falla, intentar desde Hive
+        _loadInstalacionesFromHive();
+      }
+    } on DioException catch (e) {
+      print('Error fetching instalaciones from server: $e');
+      // Fallback a Hive
+      _loadInstalacionesFromHive();
+    } catch (e) {
+      print('Error fetching instalaciones: $e');
+      // Fallback a Hive
+      _loadInstalacionesFromHive();
+    }
+  }
+
+  void _loadInstalacionesFromHive() {
+    List<Map<String, dynamic>> instalacionesData = HiveHelper.getInstalaciones(widget.empresaId);
+
+    // Filtrar nuevamente por id_empresas para asegurarnos que sean las correctas
     instalacionesData = instalacionesData.where((inst) => inst['id_empresas'] == widget.empresaId).toList();
 
     setState(() {
@@ -86,7 +148,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     builder: (context) => LupaEmpresaScreen(
                       empresaId: widget.empresaId,
                       bearerToken: widget.bearerToken,
-                      idEmpresaAsociada: widget.empresaId,  // Aquí usamos el mismo id que id_empresas
+                      idEmpresaAsociada: widget.empresaId,
                       empresa: widget.empresaData,
                     ),
                   ),
@@ -165,7 +227,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               Center(
                 child: OutlinedButton(
                   onPressed: () {
-                    // Navegar a HomeScreen
+                    // Navegar a HomeScreen y resetear stack
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(

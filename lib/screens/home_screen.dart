@@ -63,7 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _setupConnectivityListener() {
     Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
       if (result == ConnectivityResult.none) {
-        // Sin conexión cargamos locales
+        // Sin conexión, cargamos datos locales
         _loadLocalData().then((_) {
           setState(() {
             _filterData();
@@ -237,88 +237,48 @@ class _HomeScreenState extends State<HomeScreen> {
         grupos = gruposData;
         gruposFiltrados = gruposData;
 
-        // Obtener instalaciones por empresa
-        for (var empresa in empresasData) {
-          // Usaremos 'id_empresas' como identificador principal
-          // para relacionar con instalaciones.
-          final empresaId = empresa['id_empresas'];
+        // Insertar empresas (solo datos generales)
+        await HiveHelper.insertEmpresas(empresasData);
 
-          // Pedimos las instalaciones de esta empresa
-          await _fetchAndStoreInstalaciones(empresaId);
+        empresas = empresasData;
+        empresasFiltradas = empresasData;
 
-          // Guardamos la empresa localmente
-          await HiveHelper.insertEmpresas([empresa]);
-
-          empresas.add(empresa);
-          empresasFiltradas.add(empresa);
-
-          setState(() {
-            _isLoading = false;
-            _filterData();
-          });
-        }
-
+        setState(() {
+          _isLoading = false;
+          _filterData();
+        });
       } else {
         throw Exception('Server error: ${response.statusCode}');
       }
     } on DioException catch (e) {
       print('Error updating server data: $e');
-      throw Exception('Error actualizando datos del servidor');
+      _showErrorSnackBar('Error al actualizar datos del servidor');
+      // Cargar locales si existen
+      await _loadLocalData();
+      setState(() {
+        _isLoading = false;
+        _filterData();
+      });
     } catch (e) {
       print('Error updating server data: $e');
-      throw Exception('Error actualizando datos del servidor');
-    }
-  }
-
-  Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
-    try {
-      final response = await dio.get(
-        "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $bearerToken',
-            'auth-type': 'no-auth',
-          },
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = response.data;
-        List<Map<String, dynamic>> instalaciones = [];
-
-        if (responseData['data']['instalaciones'] != null) {
-          instalaciones = List<Map<String, dynamic>>.from(
-            responseData['data']['instalaciones'].map((instalacion) => {
-                  'id_instalacion': instalacion['id_instalaciones'],
-                  'nombre': instalacion['nombre'],
-                  'id_empresas': instalacion['id_empresas'], // Vincula la instalación con la empresa
-                }),
-          );
-        }
-
-        // Guardar las instalaciones bajo la clave de esta empresa
-        await HiveHelper.insertInstalaciones(empresaId, instalaciones);
-      } else {
-        throw Exception('Error al obtener instalaciones: ${response.statusCode}');
-      }
-    } on DioException catch (e) {
-      print('Error fetching instalaciones: $e');
-      throw Exception('Error obteniendo instalaciones');
-    } catch (e) {
-      print('Error fetching instalaciones: $e');
-      throw Exception('Error obteniendo instalaciones');
+      _showErrorSnackBar('Error al actualizar datos del servidor');
+      // Cargar locales si existen
+      await _loadLocalData();
+      setState(() {
+        _isLoading = false;
+        _filterData();
+      });
     }
   }
 
   void navigateToEmpresaScreen(String empresaId, Map<String, dynamic> empresaData) {
-    // Ahora pasamos empresaId = empresa['id_empresas'] (no 'id_empresa_asociada')
-    // Para que en EmpresaScreen se filtren las instalaciones de esa empresa
+    // Al navegar, en EmpresaScreen se hará la carga lazy de instalaciones,
+    // filtrando por id_empresas dentro de esa pantalla.
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => EmpresaScreen(
-          empresaId: empresaData['id_empresas'], // Usamos id_empresas
+          empresaId: empresaId,
           bearerToken: bearerToken,
           empresaData: empresaData,
         ),
@@ -437,7 +397,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       for (var empresa in empresasFiltradas)
                         GestureDetector(
                           onTap: () {
-                            // Llamamos con empresa['id_empresas'] como empresaId
                             navigateToEmpresaScreen(empresa['id_empresas'], empresa);
                           },
                           child: Container(
