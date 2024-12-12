@@ -17,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   String bearerToken = "";
+  String id_usuarios = ""; // Variable para almacenar el id_usuarios obtenido del login
   String _language = 'es'; // Solo idioma español
   bool _showPendingMessages = false;
   List<Map<String, dynamic>> empresas = [];
@@ -30,8 +31,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _usernameController.text = '';
-    _passwordController.text = '';
+    _usernameController.text = '20300444351';
+    _passwordController.text = 'AGus2014';
 
     // Configuración de Dio + CookieJar
     cookieJar = CookieJar();
@@ -72,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> login(BuildContext context) async {
-    // Mostrar el diálogo de "Cargando..." sin subrayados
+    // Mostrar el diálogo de "Cargando..."
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -153,6 +154,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (statusCode == 200) {
         bearerToken = responseData['data']['Bearer'];
+        // Guardar el id_usuarios
+        id_usuarios = responseData['data']['userData']['id_usuarios'];
+        
         setState(() {
           _showPendingMessages = true;
         });

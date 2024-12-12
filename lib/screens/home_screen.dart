@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import './empresa_screen.dart';
-import './lupa_empresa.dart';
 import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
@@ -40,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late Dio dio;
   late CookieJar cookieJar;
+
+  String id_empresas = ""; // Variable para almacenar el id_empresas de la empresa seleccionada
 
   @override
   void initState() {
@@ -349,20 +350,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void navigateToEmpresaScreen(String empresaId, Map<String, dynamic> empresaData) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => EmpresaScreen(
-          empresaId: empresaId,
-          bearerToken: bearerToken,
-          empresaData: empresaData,
-        ),
-      ),
-    );
-  }
-
-  // Nuevo método para crear el avatar de una empresa con la inicial
   Widget _buildEmpresaAvatar(String? nombreEmpresa) {
     String inicial = 'E';
     if (nombreEmpresa != null && nombreEmpresa.isNotEmpty) {
@@ -383,7 +370,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Nuevo método para crear el avatar de un grupo con la inicial (ya existente)
   Widget _buildGrupoAvatar(String? nombreGrupo) {
     String inicial = 'G';
     if (nombreGrupo != null && nombreGrupo.isNotEmpty) {
@@ -520,7 +506,18 @@ class _HomeScreenState extends State<HomeScreen> {
                       for (var empresa in empresasFiltradas)
                         GestureDetector(
                           onTap: () {
-                            navigateToEmpresaScreen(empresa['id_empresas'].toString(), empresa);
+                            // Guardar el id_empresas y navegar a EmpresaScreen
+                            id_empresas = empresa['id_empresas'].toString();
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => EmpresaScreen(
+                                  empresaId: id_empresas,
+                                  bearerToken: bearerToken,
+                                  empresaData: empresa,
+                                ),
+                              ),
+                            );
                           },
                           child: Container(
                             margin: EdgeInsets.only(bottom: 12),
@@ -539,7 +536,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             child: Row(
                               children: [
-                                // Ahora utilizamos el avatar con la inicial de la empresa
                                 _buildEmpresaAvatar(empresa['nombre']),
                                 SizedBox(width: 10),
                                 Expanded(
@@ -599,7 +595,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           child: Row(
                             children: [
-                              // Avatar con la inicial del grupo
                               _buildGrupoAvatar(grupo['nombre']),
                               SizedBox(width: 10),
                               Expanded(
@@ -613,9 +608,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               ),
-                              SizedBox(width: 10),
-                              // Se quita el icono integral para los grupos
-                              // Ya no se muestra 'assets/integral_icon.png'
                             ],
                           ),
                         ),

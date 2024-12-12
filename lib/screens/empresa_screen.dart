@@ -359,10 +359,8 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
             ),
             SizedBox(height: 30),
             Expanded(
-              // Si _isLoading es true, no mostramos nada (el dialogo se encarga del loading)
-              // Si _isLoading es false, mostramos segun si hay instalaciones o no.
               child: _isLoading
-                  ? Container() // No mostrar nada, ya está el dialogo "Cargando..."
+                  ? Container()
                   : (instalaciones.isNotEmpty
                       ? ListView.builder(
                           itemCount: instalaciones.length,
