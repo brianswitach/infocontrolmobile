@@ -52,16 +52,24 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   late Dio dio;
   late CookieJar cookieJar;
 
+  // Variable para obtener id_usuarios desde Hive
+  String hiveIdUsuarios = '';
+
   @override
   void initState() {
     super.initState();
+
+    // Configurar Dio con manejo de cookies
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
+    // Leemos el id_usuarios desde Hive
+    hiveIdUsuarios = HiveHelper.getIdUsuarios();
+    print("id_usuarios obtenido desde Hive: $hiveIdUsuarios");
+
     searchController.addListener(_filterEmployees);
 
-    // Carga inicial de empleados
     obtenerEmpleados().then((_) {
       if (widget.openScannerOnInit) {
         _mostrarEscanerQR();
@@ -114,6 +122,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     });
   }
 
+  /// Busca el DNI en el campo personalIdController, hace la petición a "listartest",
+  /// encuentra el id_entidad y luego hace un POST a register_movement.
+  /// Si la respuesta es 200, se muestra únicamente el "message" dentro de "data".
   Future<void> _buscarPersonalId() async {
     final texto = personalIdController.text.trim();
     if (texto.isEmpty) {
@@ -180,9 +191,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         return;
       }
 
+      // 1) Obtenemos la info del endpoint listartest
       final url = Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
           .replace(queryParameters: {
-        'id_empresas': widget.empresaId,  // Param id_empresas
+        'id_empresas': widget.empresaId,
       });
 
       final response = await dio.get(
@@ -199,22 +211,59 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       Navigator.pop(context);
       final statusCode = response.statusCode ?? 0;
 
-      // Mostramos cartel con código de respuesta
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Código de respuesta'),
-            content: Text('El código de respuesta es: $statusCode'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
+      if (statusCode == 200) {
+        final responseData = response.data;
+        List<dynamic> employeesData = responseData['data'] ?? [];
+
+        final String dniIngresado = texto;
+
+        // Buscamos el empleado con valor == dniIngresado
+        final foundEmployee = employeesData.firstWhere(
+          (emp) => emp['valor']?.toString().trim() == dniIngresado,
+          orElse: () => null,
+        );
+
+        if (foundEmployee != null) {
+          final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
+
+          // 2) POST a register_movement
+          await _registerMovement(idEntidad);
+        } else {
+          // No se encontró el DNI
+          showDialog(
+            context: context,
+            builder: (ctx) {
+              return AlertDialog(
+                title: const Text('No encontrado'),
+                content: const Text('No se encontró el DNI en la respuesta.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('OK'),
+                  ),
+                ],
+              );
+            },
           );
-        },
-      );
+        }
+      } else {
+        // Código distinto de 200
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Código de respuesta'),
+              content: Text('El código de respuesta es: $statusCode'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
     } on DioException catch (e) {
       Navigator.pop(context);
       showDialog(
@@ -252,7 +301,140 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
-  // Método para reiniciar la página y escanear
+  /// Hace POST al endpoint /register_movement y muestra SOLO el "message" dentro de "data" si statusCode == 200
+  Future<void> _registerMovement(String idEntidad) async {
+    try {
+      // Mostramos un pequeño "Cargando..." mientras se hace el POST
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => Center(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text(
+                  'Cargando...',
+                  style: TextStyle(
+                    fontFamily: 'Montserrat',
+                    fontSize: 16,
+                    color: Colors.black,
+                    decoration: TextDecoration.none,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final Map<String, dynamic> postData = {
+        'id_empresas': widget.empresaId,
+        'id_usuarios': hiveIdUsuarios,
+        'id_entidad': idEntidad,
+      };
+
+      final postUrl = "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement";
+      final postResponse = await dio.post(
+        postUrl,
+        data: jsonEncode(postData),
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer ${widget.bearerToken}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+
+      Navigator.pop(context); // Cerrar "Cargando..."
+
+      final int statusCode = postResponse.statusCode ?? 0;
+      final dynamic fullResponse = postResponse.data;
+
+      if (statusCode == 200) {
+        // Obtenemos el message dentro de data
+        final dynamic dataObject = fullResponse['data'] ?? {};
+        final String messageToShow = dataObject['message'] ?? 'Mensaje no disponible';
+
+        // Mostramos SÓLO el "message" en un AlertDialog
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Respuesta exitosa'),
+              content: Text(messageToShow),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      } else {
+        // Si no es 200, mostramos el code y la respuesta
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: Text('Código de respuesta: $statusCode'),
+              content: Text('Respuesta completa:\n${fullResponse.toString()}'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
+    } on DioException catch (e) {
+      Navigator.pop(context);
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Error al registrar movimiento'),
+            content: Text('Error en la solicitud POST: ${e.toString()}'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      Navigator.pop(context);
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Error inesperado'),
+            content: Text('Ocurrió un error en POST: $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
   void _reIniciarPaginaYEscanear() {
     if (!mounted) return;
     Navigator.pushReplacement(
@@ -406,7 +588,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> _fetchEmpleadosAPI() async {
-    // Mostrar el diálogo de "Cargando..."
+    // Mostrar diálogo "Cargando..."
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -440,7 +622,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       Navigator.pop(context);
-      // Modo offline: cargar empleados de Hive
       List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       setState(() {
         empleados = empleadosLocales;
@@ -536,7 +717,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   Future<void> obtenerEmpleados() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      // Sin conexión: cargar desde Hive
       List<dynamic>? empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales != null && empleadosLocales.isNotEmpty) {
         setState(() {
@@ -556,7 +736,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         );
       }
     } else {
-      // Con conexión
       try {
         final url = Uri.parse(
           'https://www.infocontrol.tech/web/api/mobile/proveedores/listar',
@@ -948,7 +1127,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   color: const Color(0xFF43b6ed),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                // Llamamos a _buscarPersonalId
                                 child: IconButton(
                                   icon: const Icon(Icons.search, color: Colors.white),
                                   onPressed: _buscarPersonalId,

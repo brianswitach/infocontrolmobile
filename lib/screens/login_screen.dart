@@ -154,9 +154,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (statusCode == 200) {
         bearerToken = responseData['data']['Bearer'];
-        // Guardar el id_usuarios
-        id_usuarios = responseData['data']['userData']['id_usuarios'];
-        
+
+        // Guardar id_usuarios en variable local
+        id_usuarios = responseData['data']['userData']['id_usuarios'] ?? '';
+
+        // Guardar id_usuarios en Hive
+        await HiveHelper.storeIdUsuarios(id_usuarios);
+
         setState(() {
           _showPendingMessages = true;
         });

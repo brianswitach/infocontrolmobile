@@ -5,6 +5,7 @@ class HiveHelper {
   static const String instalacionesBoxName = 'instalacionesBox';
   static const String empleadosBoxName = 'empleadosBox';
   static const String gruposBoxName = 'gruposBox';
+  static const String userDataBoxName = 'userDataBox'; // Nuevo box para usuario
 
   // Inicializar Hive y abrir los boxes necesarios
   static Future<void> initHive() async {
@@ -12,8 +13,10 @@ class HiveHelper {
     await Hive.openBox(instalacionesBoxName);
     await Hive.openBox(empleadosBoxName);
     await Hive.openBox(gruposBoxName);
+    await Hive.openBox(userDataBoxName); // Abrimos el box de userData
   }
 
+  // ---------------------
   // Métodos para Empresas
   // ---------------------
   static Future<void> insertEmpresas(List<Map<String, dynamic>> empresas) async {
@@ -33,6 +36,7 @@ class HiveHelper {
     await box.delete('empresasList');
   }
 
+  // ------------------
   // Métodos para Grupos
   // ------------------
   static Future<void> insertGrupos(List<Map<String, dynamic>> grupos) async {
@@ -52,6 +56,7 @@ class HiveHelper {
     await box.delete('gruposList');
   }
 
+  // --------------------------
   // Métodos para Instalaciones
   // --------------------------
   static Future<void> insertInstalaciones(String empresaId,
@@ -72,10 +77,10 @@ class HiveHelper {
     await box.delete(empresaId);
   }
 
+  // ----------------------
   // Métodos para Empleados
   // ----------------------
-  static Future<void> insertEmpleados(
-      String empresaId, List<dynamic> empleados) async {
+  static Future<void> insertEmpleados(String empresaId, List<dynamic> empleados) async {
     final box = Hive.box(empleadosBoxName);
     await box.put(empresaId, empleados);
   }
@@ -90,5 +95,18 @@ class HiveHelper {
   static Future<void> deleteEmpleados(String empresaId) async {
     final box = Hive.box(empleadosBoxName);
     await box.delete(empresaId);
+  }
+
+  // ------------------------
+  // Métodos para id_usuarios
+  // ------------------------
+  static Future<void> storeIdUsuarios(String idUsuarios) async {
+    final box = Hive.box(userDataBoxName);
+    await box.put('id_usuarios', idUsuarios);
+  }
+
+  static String getIdUsuarios() {
+    final box = Hive.box(userDataBoxName);
+    return box.get('id_usuarios', defaultValue: '');
   }
 }
