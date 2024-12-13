@@ -35,14 +35,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractorTipo;
   String? selectedContractorMensajeGeneral;
   bool showContractorInfo = false;
-  bool showEmployees = false;
+  bool showEmployees = false; 
   List<dynamic> empleados = [];
+  List<dynamic> filteredEmpleados = []; 
   bool isLoading = true;
-  bool isLoadingContractors = false;
+  bool isLoadingContractors = false; 
   final MobileScannerController controladorCamara = MobileScannerController();
 
   final TextEditingController personalIdController = TextEditingController();
   final TextEditingController dominioController = TextEditingController();
+  final TextEditingController searchController = TextEditingController(); 
 
   bool qrScanned = false; 
   bool? resultadoHabilitacion; 
@@ -58,6 +60,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
+    searchController.addListener(_filterEmployees);
+
     obtenerEmpleados().then((_) {
       if (widget.openScannerOnInit) {
         _mostrarEscanerQR();
@@ -70,6 +74,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     controladorCamara.dispose();
     personalIdController.dispose();
     dominioController.dispose();
+    searchController.dispose();
     super.dispose();
   }
 
@@ -148,6 +153,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   Future<void> obtenerEmpleados() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
+      // Cargamos desde Hive si no hay conexión.
       List<dynamic>? empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales != null && empleadosLocales.isNotEmpty) {
         setState(() {
@@ -187,11 +193,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
         if (response.statusCode == 200) {
           final responseData = response.data;
+          empleados = responseData['data'] ?? [];
+          // Guardamos en Hive
+          await HiveHelper.insertEmpleados(widget.empresaId, empleados);
           setState(() {
-            empleados = responseData['data'] ?? [];
             isLoading = false;
           });
-          await HiveHelper.insertEmpleados(widget.empresaId, empleados);
         } else {
           setState(() {
             isLoading = false;
@@ -322,28 +329,60 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> _fetchEmpleadosAPI() async {
-    try {
-      var connectivityResult = await Connectivity().checkConnectivity();
-      if (connectivityResult == ConnectivityResult.none) {
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          builder: (context) {
-            return AlertDialog(
-              title: Text('Sin conexión'),
-              content: Text('No hay conexión a internet para solicitar datos.'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text('OK'),
+    // Mostrar el diálogo de "Cargando..."
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          padding: EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text(
+                'Cargando...',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                  decoration: TextDecoration.none,
                 ),
-              ],
-            );
-          },
-        );
-        return;
-      }
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
 
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // Sin conexión, cargamos desde Hive
+      Navigator.pop(context); // Cerrar el diálogo de cargando
+      List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
+      if (empleadosLocales.isNotEmpty) {
+        setState(() {
+          empleados = empleadosLocales;
+          filteredEmpleados = empleadosLocales;
+          showEmployees = true;
+        });
+      } else {
+        // No hay empleados locales
+        setState(() {
+          showEmployees = true; // Mostramos la lista vacía
+          empleados = [];
+          filteredEmpleados = [];
+        });
+      }
+      return;
+    }
+
+    try {
       final url = Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
           .replace(queryParameters: {
         'id_empresas': widget.empresaId,
@@ -360,25 +399,40 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         ),
       );
 
+      Navigator.pop(context); // Cerrar diálogo de cargando
+
       final statusCode = response.statusCode;
 
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: Text('Código de respuesta'),
-            content: Text('El código de respuesta es: $statusCode'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
+      if (statusCode == 200) {
+        final responseData = response.data;
+        List<dynamic> empleadosData = responseData['data'] ?? [];
+        // Guardamos los empleados en Hive para uso offline
+        await HiveHelper.insertEmpleados(widget.empresaId, empleadosData);
+        setState(() {
+          empleados = empleadosData;
+          filteredEmpleados = empleadosData; 
+          showEmployees = true;
+        });
+      } else {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: Text('Código de respuesta'),
+              content: Text('El código de respuesta es: $statusCode'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
     } on DioException catch (e) {
+      Navigator.pop(context);
       if (!mounted) return;
       showDialog(
         context: context,
@@ -396,6 +450,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         },
       );
     } catch (e) {
+      Navigator.pop(context);
       if (!mounted) return;
       showDialog(
         context: context,
@@ -412,6 +467,51 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           );
         },
       );
+    }
+  }
+
+  void _filterEmployees() {
+    String query = searchController.text.toLowerCase().trim();
+    if (query.isEmpty) {
+      setState(() {
+        filteredEmpleados = List.from(empleados);
+      });
+    } else {
+      List<dynamic> temp = [];
+      for (var empleado in empleados) {
+        final datosString = empleado['datos']?.toString() ?? '';
+        String nombre = 'No disponible';
+        String apellido = '';
+
+        if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
+          try {
+            List datosList = jsonDecode(datosString);
+            var apellidoMap = datosList.firstWhere((item) => item['id'] == "Apellido:", orElse: () => null);
+            var nombreMap = datosList.firstWhere((item) => item['id'] == "Nombre:", orElse: () => null);
+
+            if (apellidoMap != null && apellidoMap['valor'] != null && apellidoMap['valor'] is String) {
+              apellido = (apellidoMap['valor'] as String).trim();
+            }
+            if (nombreMap != null && nombreMap['valor'] != null && nombreMap['valor'] is String) {
+              String tempNombre = (nombreMap['valor'] as String).trim();
+              if (tempNombre.isNotEmpty) {
+                nombre = tempNombre;
+              }
+            }
+          } catch (e) {
+            // Si falla el parseo
+          }
+        }
+
+        final displayName = "$nombre ${apellido.isNotEmpty ? apellido : ''}".trim().toLowerCase();
+
+        if (displayName.startsWith(query)) {
+          temp.add(empleado);
+        }
+      }
+      setState(() {
+        filteredEmpleados = temp;
+      });
     }
   }
 
@@ -836,84 +936,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   const Text('Tipo persona: -'),
                                   Text('Tipo trabajador: ${selectedContractorTipo ?? 'No disponible'}'),
                                   const Text('Actividades: -'),
-                                  if (showEmployees && empleados.isNotEmpty) ...[
-                                    const SizedBox(height: 20),
-                                    const Text(
-                                      'Empleados',
-                                      style: TextStyle(
-                                        fontFamily: 'Montserrat',
-                                        fontSize: 18,
-                                        color: Color(0xFF7e8e95),
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    ...empleados.map((empleado) => Padding(
-                                          padding: const EdgeInsets.only(bottom: 8.0),
-                                          child: Row(
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  '${empleado['documento']} - ${empleado['apellido_nombre']}',
-                                                  style: TextStyle(
-                                                    color: empleado['habilitado'] == true ? Colors.green : Colors.red[800],
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              ElevatedButton(
-                                                onPressed: () {
-                                                  _mostrarProximamente();
-                                                },
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: const Color(0xFF43b6ed),
-                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                  minimumSize: const Size(60, 30),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: const [
-                                                    Icon(Icons.arrow_forward, color: Colors.white, size: 16),
-                                                    SizedBox(width: 4),
-                                                    Text(
-                                                      'Entrar',
-                                                      style: TextStyle(color: Colors.white, fontSize: 12),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        )).toList(),
-                                  ],
-                                  const SizedBox(height: 20),
-                                  Center(
-                                    child: ElevatedButton(
-                                      onPressed: () {
-                                        _mostrarProximamente();
-                                      },
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.grey[300],
-                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: const [
-                                          Icon(Icons.print, color: Colors.black54),
-                                          SizedBox(width: 8),
-                                          Text(
-                                            'Imprimir',
-                                            style: TextStyle(color: Colors.black54),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
                                 ],
                               ),
                             ),
                           ],
-                          // Los 3 botones siempre al final (después de todo)
                           const SizedBox(height: 30),
                           Row(
                             children: [
@@ -987,6 +1013,108 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               ),
                             ),
                           ),
+                          if (showEmployees) ...[
+                            const SizedBox(height: 30),
+                            TextField(
+                              controller: searchController,
+                              decoration: InputDecoration(
+                                hintText: 'Buscar Empleado',
+                                hintStyle: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  color: Colors.grey,
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(color: Colors.grey, width: 1),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(color: Colors.grey, width: 1),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(color: Colors.blue, width: 1),
+                                ),
+                                prefixIcon: Icon(Icons.search, color: Colors.grey),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            if (filteredEmpleados.isNotEmpty) ...[
+                              for (var empleado in filteredEmpleados)
+                                Builder(builder: (context) {
+                                  final datosString = empleado['datos']?.toString() ?? '';
+                                  String nombre = 'No disponible';
+                                  String apellido = '';
+
+                                  if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
+                                    try {
+                                      List datosList = jsonDecode(datosString);
+                                      var apellidoMap = datosList.firstWhere((item) => item['id'] == "Apellido:", orElse: () => null);
+                                      var nombreMap = datosList.firstWhere((item) => item['id'] == "Nombre:", orElse: () => null);
+
+                                      if (apellidoMap != null && apellidoMap['valor'] != null && apellidoMap['valor'] is String) {
+                                        apellido = (apellidoMap['valor'] as String).trim();
+                                      }
+                                      if (nombreMap != null && nombreMap['valor'] != null && nombreMap['valor'] is String) {
+                                        String tempNombre = (nombreMap['valor'] as String).trim();
+                                        if (tempNombre.isNotEmpty) {
+                                          nombre = tempNombre;
+                                        }
+                                      }
+                                    } catch (e) {
+                                      // Si falla el parseo, sin cambios
+                                    }
+                                  }
+
+                                  final displayName = "$nombre ${apellido.isNotEmpty ? apellido : ''}".trim();
+
+                                  return Container(
+                                    margin: EdgeInsets.only(bottom: 8),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            "$displayName -",
+                                            style: TextStyle(
+                                              fontFamily: 'Montserrat',
+                                              fontSize: 16,
+                                              color: Colors.black,
+                                              decoration: TextDecoration.none,
+                                            ),
+                                          ),
+                                        ),
+                                        ElevatedButton(
+                                          onPressed: () {
+                                            _mostrarProximamente();
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Color(0xFF43b6ed),
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            minimumSize: const Size(60, 30),
+                                          ),
+                                          child: Text(
+                                            'Entra',
+                                            style: TextStyle(color: Colors.white, fontSize: 12),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                })
+                            ] else ...[
+                              Text(
+                                'No hay empleados.',
+                                style: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  fontSize: 16,
+                                  color: Colors.black,
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ]
+                          ]
                         ],
                       ),
                     ),
