@@ -5,7 +5,6 @@ import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:math';
-
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
