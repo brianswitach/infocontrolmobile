@@ -1,14 +1,12 @@
+import 'dart:async'; // <-- IMPORTANTE para StreamSubscription
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'dart:math';
-
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'dart:convert';
+import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
@@ -17,13 +15,14 @@ class LupaEmpresaScreen extends StatefulWidget {
   final String empresaId;
   final bool openScannerOnInit;
 
-  LupaEmpresaScreen({
+  const LupaEmpresaScreen({
+    Key? key,
     required this.empresa,
     required this.bearerToken,
     required this.idEmpresaAsociada,
     required this.empresaId,
     this.openScannerOnInit = false,
-  });
+  }) : super(key: key);
 
   @override
   _LupaEmpresaScreenState createState() => _LupaEmpresaScreenState();
@@ -51,6 +50,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
   late Dio dio;
   late CookieJar cookieJar;
+  late Connectivity connectivity;
+  late StreamSubscription<ConnectivityResult> connectivitySubscription;
 
   // Variable para obtener id_usuarios desde Hive
   String hiveIdUsuarios = '';
@@ -63,6 +64,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
+
+    // Inicializamos la clase Connectivity y nos suscribimos a los cambios de conexión.
+    connectivity = Connectivity();
+    connectivitySubscription = connectivity.onConnectivityChanged.listen((ConnectivityResult result) {
+      if (result != ConnectivityResult.none) {
+        // Si volvimos a tener conexión, procesamos los registros pendientes
+        _processPendingRequests();
+      }
+    });
 
     // Leemos el id_usuarios desde Hive
     hiveIdUsuarios = HiveHelper.getIdUsuarios();
@@ -83,6 +93,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     personalIdController.dispose();
     dominioController.dispose();
     searchController.dispose();
+    connectivitySubscription.cancel();
     super.dispose();
   }
 
@@ -122,9 +133,94 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     });
   }
 
+  /// Cuando no haya conexión, se guarda el DNI ingresado en almacenamiento local
+  /// para enviarlo automáticamente cuando haya conexión.
+  Future<void> _saveOfflineRequest(String dniIngresado) async {
+    // Generamos un objeto que represente el pending request
+    final Map<String, dynamic> pendingData = {
+      "dni": dniIngresado,
+      "id_empresas": widget.empresaId,
+      "id_usuarios": hiveIdUsuarios,
+      "timestamp": DateTime.now().toIso8601String(),
+    };
+    // Guardamos en Hive con un método nuevo
+    HiveHelper.savePendingDNIRequest(pendingData);
+  }
+
+  /// Procesa todos los registros pendientes cuando vuelve la conexión
+  Future<void> _processPendingRequests() async {
+    // Obtenemos todos los pendientes desde Hive
+    final List<Map<String, dynamic>> pendingRequests = HiveHelper.getAllPendingDNIRequests();
+    if (pendingRequests.isEmpty) return;
+
+    // Para cada solicitud pendiente, intentamos su flujo normal (listartest + register_movement).
+    for (var requestData in pendingRequests) {
+      final String dniIngresado = requestData["dni"] ?? '';
+      final String idEmpresas = requestData["id_empresas"] ?? '';
+      final String idUsuarios = requestData["id_usuarios"] ?? '';
+
+      if (dniIngresado.isEmpty) continue; // Saltamos si está vacío
+
+      try {
+        final response = await dio.get(
+          Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
+              .replace(queryParameters: {'id_empresas': idEmpresas}).toString(),
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer ${widget.bearerToken}',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+          ),
+        );
+
+        final statusCode = response.statusCode ?? 0;
+        if (statusCode == 200) {
+          final responseData = response.data;
+          List<dynamic> employeesData = responseData['data'] ?? [];
+          final foundEmployee = employeesData.firstWhere(
+            (emp) => emp['valor']?.toString().trim() == dniIngresado,
+            orElse: () => null,
+          );
+          if (foundEmployee != null) {
+            final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
+            // Hacemos POST a register_movement
+            final Map<String, dynamic> postData = {
+              'id_empresas': idEmpresas,
+              'id_usuarios': idUsuarios,
+              'id_entidad': idEntidad,
+            };
+
+            final postUrl = "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement";
+            final postResponse = await dio.post(
+              postUrl,
+              data: jsonEncode(postData),
+              options: Options(
+                headers: {
+                  'Authorization': 'Bearer ${widget.bearerToken}',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                },
+              ),
+            );
+
+            if ((postResponse.statusCode ?? 0) == 200) {
+              // Si funcionó, quitamos la solicitud del almacenamiento
+              HiveHelper.removePendingDNIRequest(requestData);
+              print("Pendiente procesado correctamente para el DNI: $dniIngresado");
+            }
+          }
+        }
+      } catch (e) {
+        // Si falla, lo dejamos en la cola para intentar más tarde.
+        print("Error procesando pendiente offline: $e");
+      }
+    }
+  }
+
   /// Busca el DNI en el campo personalIdController, hace la petición a "listartest",
   /// encuentra el id_entidad y luego hace un POST a register_movement.
-  /// Si la respuesta es 200, se muestra únicamente el "message" dentro de "data".
+  /// Si NO hay conexión, se guarda localmente para enviar cuando vuelva la conexión.
   Future<void> _buscarPersonalId() async {
     final texto = personalIdController.text.trim();
     if (texto.isEmpty) {
@@ -138,7 +234,31 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    // Mostramos cartel "Cargando..."
+    final connectivityResult = await connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // Guardamos offline y mostramos mensaje
+      await _saveOfflineRequest(texto);
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Modo offline'),
+            content: const Text(
+                'Se guardó para registrar cuando vuelva la conexión. Mientras tanto, puede ingresar o salir.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    // Mostramos cartel "Cargando..." si hay conexión
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -170,28 +290,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
 
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
-      if (connectivityResult == ConnectivityResult.none) {
-        Navigator.pop(context);
-        showDialog(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              title: const Text('Modo offline'),
-              content: const Text('No hay conexión para solicitar datos.'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('OK'),
-                ),
-              ],
-            );
-          },
-        );
-        return;
-      }
-
-      // 1) Obtenemos la info del endpoint listartest
       final url = Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
           .replace(queryParameters: {
         'id_empresas': widget.empresaId,
@@ -496,7 +594,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
 
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
+      final connectivityResult = await connectivity.checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
         Navigator.pop(context);
         showDialog(
@@ -619,7 +717,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       ),
     );
 
-    var connectivityResult = await Connectivity().checkConnectivity();
+    var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       Navigator.pop(context);
       List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
@@ -715,10 +813,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> obtenerEmpleados() async {
-    var connectivityResult = await Connectivity().checkConnectivity();
+    var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       List<dynamic>? empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
-      if (empleadosLocales != null && empleadosLocales.isNotEmpty) {
+      if (empleadosLocales.isNotEmpty) {
         setState(() {
           empleados = empleadosLocales;
           isLoading = false;
@@ -849,7 +947,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       context: context,
       isScrollControlled: true,
       builder: (BuildContext context) {
-        return Container(
+        return SizedBox(
           height: MediaQuery.of(context).size.height * 0.8,
           child: Column(
             children: [
@@ -1257,7 +1355,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   const Icon(Icons.qr_code_scanner, color: Colors.white, size: 24),
                                   const SizedBox(width: 8),
                                   Text(
-                                    qrScanned ? "Ingresar con otro QR" : "Ingreso con QR",
+                                    botonQrText,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 16,
