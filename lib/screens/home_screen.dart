@@ -40,7 +40,10 @@ class _HomeScreenState extends State<HomeScreen> {
   late Dio dio;
   late CookieJar cookieJar;
 
-  String id_empresas = ""; // Variable para almacenar el id_empresas de la empresa seleccionada
+  String id_empresas = "";
+
+  // Control de expansión de grupos
+  Map<String, bool> _expandedGroups = {};
 
   @override
   void initState() {
@@ -53,7 +56,6 @@ class _HomeScreenState extends State<HomeScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
-    // Guardar el token inicial en Hive (por si no estaba guardado antes)
     HiveHelper.storeBearerToken(bearerToken);
 
     _startTokenRefreshTimer();
@@ -154,10 +156,7 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
 
-        // Guardar el nuevo token en Hive
         await HiveHelper.storeBearerToken(newToken);
-
-        // Luego de actualizar el token, actualizar datos del servidor
         await _updateDataFromServer();
       } else {
         throw Exception('Error al actualizar el token: ${response.statusCode}');
@@ -199,7 +198,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _isLoading = true;
     });
 
-    // Siempre tomar el token actual desde Hive por si se actualizó
     String currentToken = HiveHelper.getBearerToken();
 
     try {
@@ -232,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
         for (var empresa in empresasData) {
           String? grupoNombre = empresa['grupo'];
           String? grupoId = empresa['id_grupos'];
-          if (grupoNombre != null && grupoId != null && !gruposUnicos.contains(grupoId)) {
+          if (grupoNombre != null && grupoNombre.isNotEmpty && grupoId != null && grupoId.isNotEmpty && !gruposUnicos.contains(grupoId)) {
             gruposUnicos.add(grupoId);
             gruposData.add({
               'id': grupoId,
@@ -252,6 +250,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
         empresas = empresasData;
         empresasFiltradas = empresasData;
+
+        _expandedGroups.clear();
+        for (var g in grupos) {
+          _expandedGroups[g['id']] = false;
+        }
 
         if (mounted) {
           setState(() {
@@ -307,7 +310,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // Siempre obtener el token actual
     String currentToken = HiveHelper.getBearerToken();
 
     try {
@@ -401,6 +403,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  // Ahora tomamos las empresas directamente de 'empresas' en lugar de 'empresasFiltradas'
+  // para asegurar que se muestren las empresas del grupo aunque el filtrado por texto no las incluya.
+  List<Map<String, dynamic>> _getEmpresasDelGrupo(String grupoId) {
+    return empresas.where((emp) => emp['id_grupos'] == grupoId).toList();
   }
 
   @override
@@ -526,7 +534,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               MaterialPageRoute(
                                 builder: (context) => EmpresaScreen(
                                   empresaId: id_empresas,
-                                  bearerToken: bearerToken, // Usamos el token actual
+                                  bearerToken: bearerToken,
                                   empresaData: empresa,
                                 ),
                               ),
@@ -591,38 +599,114 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       SizedBox(height: 20),
                       for (var grupo in gruposFiltrados)
-                        Container(
-                          margin: EdgeInsets.only(bottom: 12),
-                          padding: EdgeInsets.all(12),
-                          height: 50,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 4,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            children: [
-                              _buildGrupoAvatar(grupo['nombre']),
-                              SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  grupo['nombre'] ?? 'Grupo sin nombre',
-                                  style: TextStyle(
-                                    fontFamily: 'Montserrat',
-                                    fontSize: 16,
-                                    color: Colors.black,
-                                    decoration: TextDecoration.none,
-                                  ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _expandedGroups[grupo['id']] = !_expandedGroups[grupo['id']]!;
+                                });
+                              },
+                              child: Container(
+                                margin: EdgeInsets.only(bottom: 12),
+                                padding: EdgeInsets.all(12),
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 4,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  children: [
+                                    _buildGrupoAvatar(grupo['nombre']),
+                                    SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        "Grupo ${grupo['nombre']}",
+                                        style: TextStyle(
+                                          fontFamily: 'Montserrat',
+                                          fontSize: 16,
+                                          color: Colors.black,
+                                          decoration: TextDecoration.none,
+                                        ),
+                                      ),
+                                    ),
+                                    Icon(
+                                      _expandedGroups[grupo['id']]! ? Icons.expand_less : Icons.expand_more,
+                                      color: Colors.grey,
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                            if (_expandedGroups[grupo['id']]!)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 16, bottom: 20),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    for (var emp in _getEmpresasDelGrupo(grupo['id']))
+                                      GestureDetector(
+                                        onTap: () {
+                                          id_empresas = emp['id_empresas'].toString();
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => EmpresaScreen(
+                                                empresaId: id_empresas,
+                                                bearerToken: bearerToken,
+                                                empresaData: emp,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        child: Container(
+                                          margin: EdgeInsets.only(bottom: 12),
+                                          padding: EdgeInsets.all(12),
+                                          height: 50,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius: BorderRadius.circular(8),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.05),
+                                                blurRadius: 4,
+                                                offset: Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              _buildEmpresaAvatar(emp['nombre']),
+                                              SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  emp['nombre'] ?? 'Empresa sin nombre',
+                                                  style: TextStyle(
+                                                    fontFamily: 'Montserrat',
+                                                    fontSize: 16,
+                                                    color: Colors.black,
+                                                    decoration: TextDecoration.none,
+                                                  ),
+                                                ),
+                                              ),
+                                              SizedBox(width: 10),
+                                              _buildTipoClienteBadge(emp['tipo_cliente'] ?? ''),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
                       SizedBox(height: 20),
                     ],
