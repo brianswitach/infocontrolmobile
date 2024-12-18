@@ -5,8 +5,8 @@ class HiveHelper {
   static const String instalacionesBoxName = 'instalacionesBox';
   static const String empleadosBoxName = 'empleadosBox';
   static const String gruposBoxName = 'gruposBox';
-  static const String userDataBoxName = 'userDataBox'; 
-  static const String pendingRequestsBoxName = 'pendingRequestsBox'; // Nuevo Box para solicitudes offline
+  static const String userDataBoxName = 'userDataBox';
+  static const String pendingRequestsBoxName = 'pendingRequestsBox';
 
   // Inicializar Hive y abrir los boxes necesarios
   static Future<void> initHive() async {
@@ -15,12 +15,10 @@ class HiveHelper {
     await Hive.openBox(empleadosBoxName);
     await Hive.openBox(gruposBoxName);
     await Hive.openBox(userDataBoxName);
-    await Hive.openBox(pendingRequestsBoxName); // Abrimos el box de peticiones pendientes
+    await Hive.openBox(pendingRequestsBoxName);
   }
 
-  // ---------------------
-  // Métodos para Empresas
-  // ---------------------
+  // Empresas
   static Future<void> insertEmpresas(List<Map<String, dynamic>> empresas) async {
     final box = Hive.box(empresasBoxName);
     await box.put('empresasList', empresas);
@@ -38,9 +36,7 @@ class HiveHelper {
     await box.delete('empresasList');
   }
 
-  // ------------------
-  // Métodos para Grupos
-  // ------------------
+  // Grupos
   static Future<void> insertGrupos(List<Map<String, dynamic>> grupos) async {
     final box = Hive.box(gruposBoxName);
     await box.put('gruposList', grupos);
@@ -58,9 +54,7 @@ class HiveHelper {
     await box.delete('gruposList');
   }
 
-  // --------------------------
-  // Métodos para Instalaciones
-  // --------------------------
+  // Instalaciones
   static Future<void> insertInstalaciones(String empresaId,
       List<Map<String, dynamic>> instalaciones) async {
     final box = Hive.box(instalacionesBoxName);
@@ -79,9 +73,7 @@ class HiveHelper {
     await box.delete(empresaId);
   }
 
-  // ----------------------
-  // Métodos para Empleados
-  // ----------------------
+  // Empleados
   static Future<void> insertEmpleados(String empresaId, List<dynamic> empleados) async {
     final box = Hive.box(empleadosBoxName);
     await box.put(empresaId, empleados);
@@ -99,9 +91,7 @@ class HiveHelper {
     await box.delete(empresaId);
   }
 
-  // ------------------------
-  // Métodos para id_usuarios
-  // ------------------------
+  // id_usuarios
   static Future<void> storeIdUsuarios(String idUsuarios) async {
     final box = Hive.box(userDataBoxName);
     await box.put('id_usuarios', idUsuarios);
@@ -112,20 +102,26 @@ class HiveHelper {
     return box.get('id_usuarios', defaultValue: '');
   }
 
-  // ---------------------------------
-  // Métodos para solicitudes OFFLINE
-  // ---------------------------------
-  /// Guarda un request pendiente (DNI, id_empresas, etc.) en el box de peticiones pendientes
+  // Bearer Token
+  static Future<void> storeBearerToken(String token) async {
+    final box = Hive.box(userDataBoxName);
+    await box.put('bearer_token', token);
+  }
+
+  static String getBearerToken() {
+    final box = Hive.box(userDataBoxName);
+    return box.get('bearer_token', defaultValue: '');
+  }
+
+  // Solicitudes OFFLINE
   static Future<void> savePendingDNIRequest(Map<String, dynamic> pendingData) async {
     final box = Hive.box(pendingRequestsBoxName);
-    // Obtenemos la lista de pendientes existente, si no existe creamos una nueva
     List<Map<String, dynamic>> pendingList =
         List<Map<String, dynamic>>.from(box.get('pendingDNIList', defaultValue: []));
     pendingList.add(pendingData);
     await box.put('pendingDNIList', pendingList);
   }
 
-  /// Retorna todas las solicitudes de DNI pendientes
   static List<Map<String, dynamic>> getAllPendingDNIRequests() {
     final box = Hive.box(pendingRequestsBoxName);
     return List<Map<String, dynamic>>.from(
@@ -133,14 +129,11 @@ class HiveHelper {
     );
   }
 
-  /// Elimina una solicitud pendiente concreta del box. 
-  /// Recibe el mismo map que se guardó originalmente, lo retira de la lista y sobrescribe.
   static Future<void> removePendingDNIRequest(Map<String, dynamic> requestData) async {
     final box = Hive.box(pendingRequestsBoxName);
     List<Map<String, dynamic>> pendingList =
         List<Map<String, dynamic>>.from(box.get('pendingDNIList', defaultValue: []));
     pendingList.removeWhere((item) {
-      // Podemos comparar timestamp + dni para tener unicidad
       return item['dni'] == requestData['dni'] &&
              item['timestamp'] == requestData['timestamp'];
     });

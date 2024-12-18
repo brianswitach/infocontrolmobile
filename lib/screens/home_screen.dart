@@ -53,6 +53,9 @@ class _HomeScreenState extends State<HomeScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
+    // Guardar el token inicial en Hive (por si no estaba guardado antes)
+    HiveHelper.storeBearerToken(bearerToken);
+
     _startTokenRefreshTimer();
     _setupConnectivityListener();
     _updateDataFromServer();
@@ -150,6 +153,11 @@ class _HomeScreenState extends State<HomeScreen> {
             bearerToken = newToken;
           });
         }
+
+        // Guardar el nuevo token en Hive
+        await HiveHelper.storeBearerToken(newToken);
+
+        // Luego de actualizar el token, actualizar datos del servidor
         await _updateDataFromServer();
       } else {
         throw Exception('Error al actualizar el token: ${response.statusCode}');
@@ -191,13 +199,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _isLoading = true;
     });
 
+    // Siempre tomar el token actual desde Hive por si se actualizó
+    String currentToken = HiveHelper.getBearerToken();
+
     try {
       final response = await dio.get(
         "https://www.infocontrol.tech/web/api/mobile/empresas/listar",
         options: Options(
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer $bearerToken',
+            'Authorization': 'Bearer $currentToken',
           },
         ),
       );
@@ -296,13 +307,16 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Siempre obtener el token actual
+    String currentToken = HiveHelper.getBearerToken();
+
     try {
       final response = await dio.get(
         "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
         options: Options(
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer $bearerToken',
+            'Authorization': 'Bearer $currentToken',
             'auth-type': 'no-auth',
           },
         ),
@@ -506,14 +520,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       for (var empresa in empresasFiltradas)
                         GestureDetector(
                           onTap: () {
-                            // Guardar el id_empresas y navegar a EmpresaScreen
                             id_empresas = empresa['id_empresas'].toString();
                             Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => EmpresaScreen(
                                   empresaId: id_empresas,
-                                  bearerToken: bearerToken,
+                                  bearerToken: bearerToken, // Usamos el token actual
                                   empresaData: empresa,
                                 ),
                               ),

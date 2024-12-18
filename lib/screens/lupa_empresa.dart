@@ -55,6 +55,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
   // Variable para obtener id_usuarios desde Hive
   String hiveIdUsuarios = '';
+  String hiveBearerToken = '';
 
   @override
   void initState() {
@@ -65,18 +66,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
-    // Inicializamos la clase Connectivity y nos suscribimos a los cambios de conexión.
     connectivity = Connectivity();
     connectivitySubscription = connectivity.onConnectivityChanged.listen((ConnectivityResult result) {
       if (result != ConnectivityResult.none) {
-        // Si volvimos a tener conexión, procesamos los registros pendientes
         _processPendingRequests();
       }
     });
 
-    // Leemos el id_usuarios desde Hive
+    // Leemos el id_usuarios y token desde Hive
     hiveIdUsuarios = HiveHelper.getIdUsuarios();
-    print("id_usuarios obtenido desde Hive: $hiveIdUsuarios");
+    hiveBearerToken = HiveHelper.getBearerToken();
 
     searchController.addListener(_filterEmployees);
 
@@ -96,8 +95,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     connectivitySubscription.cancel();
     super.dispose();
   }
-
-  // ==================== MÉTODOS ADICIONALES ====================
 
   void _mostrarProximamente() {
     if (!mounted) return;
@@ -133,33 +130,29 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     });
   }
 
-  /// Cuando no haya conexión, se guarda el DNI ingresado en almacenamiento local
-  /// para enviarlo automáticamente cuando haya conexión.
   Future<void> _saveOfflineRequest(String dniIngresado) async {
-    // Generamos un objeto que represente el pending request
     final Map<String, dynamic> pendingData = {
       "dni": dniIngresado,
       "id_empresas": widget.empresaId,
       "id_usuarios": hiveIdUsuarios,
       "timestamp": DateTime.now().toIso8601String(),
     };
-    // Guardamos en Hive con un método nuevo
     HiveHelper.savePendingDNIRequest(pendingData);
   }
 
-  /// Procesa todos los registros pendientes cuando vuelve la conexión
   Future<void> _processPendingRequests() async {
-    // Obtenemos todos los pendientes desde Hive
     final List<Map<String, dynamic>> pendingRequests = HiveHelper.getAllPendingDNIRequests();
     if (pendingRequests.isEmpty) return;
 
-    // Para cada solicitud pendiente, intentamos su flujo normal (listartest + register_movement).
+    // Actualizamos el token desde Hive antes de las solicitudes
+    hiveBearerToken = HiveHelper.getBearerToken();
+
     for (var requestData in pendingRequests) {
       final String dniIngresado = requestData["dni"] ?? '';
       final String idEmpresas = requestData["id_empresas"] ?? '';
       final String idUsuarios = requestData["id_usuarios"] ?? '';
 
-      if (dniIngresado.isEmpty) continue; // Saltamos si está vacío
+      if (dniIngresado.isEmpty) continue;
 
       try {
         final response = await dio.get(
@@ -167,7 +160,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
               .replace(queryParameters: {'id_empresas': idEmpresas}).toString(),
           options: Options(
             headers: {
-              'Authorization': 'Bearer ${widget.bearerToken}',
+              'Authorization': 'Bearer $hiveBearerToken',
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
@@ -185,15 +178,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           if (foundEmployee != null) {
             final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
 
-            // Antes de hacer el register_movement, checkeamos si esta habilitado
             final String estado = foundEmployee['estado']?.toString().trim() ?? '';
             if (estado.toLowerCase() == 'inhabilitado') {
-              // Si está inhabilitado, no se realiza el movimiento y se deja el pendiente
               print("Pendiente no procesado, empleado inhabilitado: $dniIngresado");
               continue;
             }
 
-            // Hacemos POST a register_movement
             final Map<String, dynamic> postData = {
               'id_empresas': idEmpresas,
               'id_usuarios': idUsuarios,
@@ -206,7 +196,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
               data: jsonEncode(postData),
               options: Options(
                 headers: {
-                  'Authorization': 'Bearer ${widget.bearerToken}',
+                  'Authorization': 'Bearer $hiveBearerToken',
                   'Content-Type': 'application/json',
                   'Accept': 'application/json',
                 },
@@ -214,22 +204,17 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
             );
 
             if ((postResponse.statusCode ?? 0) == 200) {
-              // Si funcionó, quitamos la solicitud del almacenamiento
               HiveHelper.removePendingDNIRequest(requestData);
               print("Pendiente procesado correctamente para el DNI: $dniIngresado");
             }
           }
         }
       } catch (e) {
-        // Si falla, lo dejamos en la cola para intentar más tarde.
         print("Error procesando pendiente offline: $e");
       }
     }
   }
 
-  /// Busca el DNI en el campo personalIdController, hace la petición a "listartest",
-  /// encuentra el id_entidad y luego hace un POST a register_movement.
-  /// Si NO hay conexión, se guarda localmente para enviar cuando vuelva la conexión.
   Future<void> _buscarPersonalId() async {
     final texto = personalIdController.text.trim();
     if (texto.isEmpty) {
@@ -245,7 +230,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      // Guardamos offline y mostramos mensaje
       await _saveOfflineRequest(texto);
       if (!mounted) return;
       showDialog(
@@ -253,8 +237,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         builder: (ctx) {
           return AlertDialog(
             title: const Text('Modo offline'),
-            content: const Text(
-                'Se guardó para registrar cuando vuelva la conexión. Mientras tanto, puede ingresar o salir.'),
+            content: const Text('Se guardó para registrar cuando vuelva la conexión. Mientras tanto, puede ingresar o salir.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -267,7 +250,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    // Mostramos cartel "Cargando..." si hay conexión
+    // Actualizar el token antes de solicitar
+    hiveBearerToken = HiveHelper.getBearerToken();
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -308,7 +293,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         url.toString(),
         options: Options(
           headers: {
-            'Authorization': 'Bearer ${widget.bearerToken}',
+            'Authorization': 'Bearer $hiveBearerToken',
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
@@ -321,20 +306,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       if (statusCode == 200) {
         final responseData = response.data;
         List<dynamic> employeesData = responseData['data'] ?? [];
-
         final String dniIngresado = texto;
 
-        // Buscamos el empleado con valor == dniIngresado
         final foundEmployee = employeesData.firstWhere(
           (emp) => emp['valor']?.toString().trim() == dniIngresado,
           orElse: () => null,
         );
 
         if (foundEmployee != null) {
-          // Chequeamos el estado
           final String estado = foundEmployee['estado']?.toString().trim() ?? '';
           if (estado.toLowerCase() == 'inhabilitado') {
-            // Mostrar mensaje de empleado inhabilitado
             showDialog(
               context: context,
               builder: (ctx) {
@@ -354,11 +335,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           }
 
           final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
-
-          // 2) POST a register_movement si esta habilitado
           await _registerMovement(idEntidad);
         } else {
-          // No se encontró el DNI
           showDialog(
             context: context,
             builder: (ctx) {
@@ -376,7 +354,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           );
         }
       } else {
-        // Código distinto de 200
         showDialog(
           context: context,
           builder: (ctx) {
@@ -430,40 +407,41 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
-  /// Hace POST al endpoint /register_movement y muestra SOLO el "message" dentro de "data" si statusCode == 200
   Future<void> _registerMovement(String idEntidad) async {
-    try {
-      // Mostramos un pequeño "Cargando..." mientras se hace el POST
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => Center(
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                CircularProgressIndicator(),
-                SizedBox(width: 16),
-                Text(
-                  'Cargando...',
-                  style: TextStyle(
-                    fontFamily: 'Montserrat',
-                    fontSize: 16,
-                    color: Colors.black,
-                    decoration: TextDecoration.none,
-                  ),
+    // Refrescar el token desde Hive
+    hiveBearerToken = HiveHelper.getBearerToken();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Center(
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text(
+                'Cargando...',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                  decoration: TextDecoration.none,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-      );
+      ),
+    );
 
+    try {
       final Map<String, dynamic> postData = {
         'id_empresas': widget.empresaId,
         'id_usuarios': hiveIdUsuarios,
@@ -476,24 +454,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         data: jsonEncode(postData),
         options: Options(
           headers: {
-            'Authorization': 'Bearer ${widget.bearerToken}',
+            'Authorization': 'Bearer $hiveBearerToken',
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
         ),
       );
 
-      Navigator.pop(context); // Cerrar "Cargando..."
+      Navigator.pop(context);
 
       final int statusCode = postResponse.statusCode ?? 0;
       final dynamic fullResponse = postResponse.data;
 
       if (statusCode == 200) {
-        // Obtenemos el message dentro de data
         final dynamic dataObject = fullResponse['data'] ?? {};
         final String messageToShow = dataObject['message'] ?? 'Mensaje no disponible';
 
-        // Mostramos SÓLO el "message" en un AlertDialog
         showDialog(
           context: context,
           builder: (ctx) {
@@ -510,7 +486,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           },
         );
       } else {
-        // Si no es 200, mostramos el code y la respuesta
         showDialog(
           context: context,
           builder: (ctx) {
@@ -571,7 +546,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       MaterialPageRoute(
         builder: (context) => LupaEmpresaScreen(
           empresa: widget.empresa,
-          bearerToken: widget.bearerToken,
+          bearerToken: hiveBearerToken, // Usar el token actualizado
           idEmpresaAsociada: widget.idEmpresaAsociada,
           empresaId: widget.empresaId,
           openScannerOnInit: true,
@@ -593,7 +568,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    // Muestra cartel de cargando
+    hiveBearerToken = HiveHelper.getBearerToken();
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -655,7 +631,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         url.toString(),
         options: Options(
           headers: {
-            'Authorization': 'Bearer ${widget.bearerToken}',
+            'Authorization': 'Bearer $hiveBearerToken',
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
@@ -717,7 +693,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> _fetchEmpleadosAPI() async {
-    // Mostrar diálogo "Cargando..."
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -748,6 +723,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       ),
     );
 
+    hiveBearerToken = HiveHelper.getBearerToken();
+
     var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       Navigator.pop(context);
@@ -770,7 +747,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         url.toString(),
         options: Options(
           headers: {
-            'Authorization': 'Bearer ${widget.bearerToken}',
+            'Authorization': 'Bearer $hiveBearerToken',
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
@@ -782,7 +759,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       if (statusCode == 200) {
         final responseData = response.data;
         List<dynamic> empleadosData = responseData['data'] ?? [];
-        // Guardamos en Hive
         await HiveHelper.insertEmpleados(widget.empresaId, empleadosData);
         setState(() {
           empleados = empleadosData;
@@ -844,6 +820,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> obtenerEmpleados() async {
+    hiveBearerToken = HiveHelper.getBearerToken();
+
     var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       List<dynamic>? empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
@@ -876,7 +854,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           url.toString(),
           options: Options(
             headers: {
-              'Authorization': 'Bearer ${widget.bearerToken}',
+              'Authorization': 'Bearer $hiveBearerToken',
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
@@ -956,13 +934,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                 nombre = tempNombre;
               }
             }
-          } catch (e) {
-            // si falla parseo
-          }
+          } catch (e) {}
         }
 
         final displayName = "$nombre ${apellido.isNotEmpty ? apellido : ''}".trim().toLowerCase();
-
         if (displayName.startsWith(query)) {
           temp.add(empleado);
         }
@@ -1031,9 +1006,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                         setState(() {
                           qrScanned = true;
                         });
-                      } catch (e) {
-                        // No hacer nada si falla parseo
-                      }
+                      } catch (e) {}
                     }
                   },
                 ),
@@ -1095,7 +1068,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
-                    // Encabezado
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -1138,7 +1110,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                       ),
                     ),
                     const SizedBox(height: 30),
-                    // Filtros
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -1398,7 +1369,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               ),
                             ),
                           ),
-                          // Info Contratista
                           if (showContractorInfo) ...[
                             const SizedBox(height: 30),
                             Container(
@@ -1462,7 +1432,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ),
                           ],
                           const SizedBox(height: 30),
-                          // Botones Empleados / Vehiculos
                           Row(
                             children: [
                               Expanded(
@@ -1529,7 +1498,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               ),
                             ),
                           ),
-                          // Listado de empleados con filtrado
                           if (showEmployees) ...[
                             const SizedBox(height: 30),
                             TextField(
@@ -1586,9 +1554,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                           nombre = tempNombre;
                                         }
                                       }
-                                    } catch (e) {
-                                      // si falla parseo
-                                    }
+                                    } catch (e) {}
                                   }
 
                                   final displayName = "$nombre ${apellido.isNotEmpty ? apellido : ''}".trim();
