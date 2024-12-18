@@ -184,6 +184,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           );
           if (foundEmployee != null) {
             final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
+
+            // Antes de hacer el register_movement, checkeamos si esta habilitado
+            final String estado = foundEmployee['estado']?.toString().trim() ?? '';
+            if (estado.toLowerCase() == 'inhabilitado') {
+              // Si está inhabilitado, no se realiza el movimiento y se deja el pendiente
+              print("Pendiente no procesado, empleado inhabilitado: $dniIngresado");
+              continue;
+            }
+
             // Hacemos POST a register_movement
             final Map<String, dynamic> postData = {
               'id_empresas': idEmpresas,
@@ -322,9 +331,31 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         );
 
         if (foundEmployee != null) {
+          // Chequeamos el estado
+          final String estado = foundEmployee['estado']?.toString().trim() ?? '';
+          if (estado.toLowerCase() == 'inhabilitado') {
+            // Mostrar mensaje de empleado inhabilitado
+            showDialog(
+              context: context,
+              builder: (ctx) {
+                return AlertDialog(
+                  title: const Text('Empleado Inhabilitado'),
+                  content: const Text('No se puede hacer el ingreso o el egreso para este empleado ya que está inhabilitado'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                );
+              },
+            );
+            return;
+          }
+
           final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
 
-          // 2) POST a register_movement
+          // 2) POST a register_movement si esta habilitado
           await _registerMovement(idEntidad);
         } else {
           // No se encontró el DNI
