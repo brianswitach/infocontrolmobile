@@ -37,6 +37,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   bool showEmployees = false; 
   List<dynamic> empleados = [];
   List<dynamic> filteredEmpleados = [];
+  List<dynamic> allEmpleados = []; // Lista de todos los empleados cargados inicialmente (proveedores)
+  List<dynamic> allFetchedEmpleados = []; // Lista de todos los empleados obtenidos al presionar "Empleados"
   bool isLoading = true;
   bool isLoadingContractors = false;
 
@@ -53,7 +55,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   late Connectivity connectivity;
   late StreamSubscription<ConnectivityResult> connectivitySubscription;
 
-  // Variable para obtener id_usuarios desde Hive
   String hiveIdUsuarios = '';
   String hiveBearerToken = '';
 
@@ -116,17 +117,27 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   void updateSelectedContractor(String nombreRazonSocial) {
-    var empleadoSeleccionado = empleados.firstWhere(
-      (empleado) => empleado['nombre_razon_social'] == nombreRazonSocial,
-      orElse: () => null,
-    );
     if (!mounted) return;
     setState(() {
       selectedContractor = nombreRazonSocial;
+      var empleadoSeleccionado = allEmpleados.firstWhere(
+        (empleado) => empleado['nombre_razon_social']?.toString().toLowerCase() == nombreRazonSocial.toLowerCase(),
+        orElse: () => null,
+      );
       selectedContractorCuit = empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
       selectedContractorTipo = empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
       selectedContractorMensajeGeneral = empleadoSeleccionado != null ? empleadoSeleccionado['mensaje_general'] : '';
       showContractorInfo = true;
+
+      // Si ya se están mostrando empleados, re-filtramos automáticamente
+      if (showEmployees && allFetchedEmpleados.isNotEmpty) {
+        List<dynamic> filtrados = allFetchedEmpleados
+            .where((emp) => (emp['nombre_razon_social']?.toString().toLowerCase() == selectedContractor?.toLowerCase()))
+            .toList();
+
+        empleados = filtrados;
+        filteredEmpleados = filtrados;
+      }
     });
   }
 
@@ -144,7 +155,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     final List<Map<String, dynamic>> pendingRequests = HiveHelper.getAllPendingDNIRequests();
     if (pendingRequests.isEmpty) return;
 
-    // Actualizamos el token desde Hive antes de las solicitudes
     hiveBearerToken = HiveHelper.getBearerToken();
 
     for (var requestData in pendingRequests) {
@@ -177,7 +187,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           );
           if (foundEmployee != null) {
             final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
-
             final String estado = foundEmployee['estado']?.toString().trim() ?? '';
             if (estado.toLowerCase() == 'inhabilitado') {
               print("Pendiente no procesado, empleado inhabilitado: $dniIngresado");
@@ -250,7 +259,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    // Actualizar el token antes de solicitar
     hiveBearerToken = HiveHelper.getBearerToken();
 
     showDialog(
@@ -408,7 +416,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> _registerMovement(String idEntidad) async {
-    // Refrescar el token desde Hive
     hiveBearerToken = HiveHelper.getBearerToken();
 
     showDialog(
@@ -546,7 +553,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       MaterialPageRoute(
         builder: (context) => LupaEmpresaScreen(
           empresa: widget.empresa,
-          bearerToken: hiveBearerToken, // Usar el token actualizado
+          bearerToken: hiveBearerToken,
           idEmpresaAsociada: widget.idEmpresaAsociada,
           empresaId: widget.empresaId,
           openScannerOnInit: true,
@@ -693,6 +700,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> _fetchEmpleadosAPI() async {
+    if (selectedContractor == null || selectedContractor!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Debes elegir un contratista'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -729,9 +746,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     if (connectivityResult == ConnectivityResult.none) {
       Navigator.pop(context);
       List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
+      List<dynamic> filtrados = empleadosLocales
+          .where((emp) => (emp['nombre_razon_social']?.toString().toLowerCase() == selectedContractor?.toLowerCase()))
+          .toList();
+
       setState(() {
-        empleados = empleadosLocales;
-        filteredEmpleados = empleadosLocales;
+        allFetchedEmpleados = empleadosLocales;
+        empleados = filtrados;
+        filteredEmpleados = filtrados;
         showEmployees = true;
       });
       return;
@@ -760,9 +782,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         final responseData = response.data;
         List<dynamic> empleadosData = responseData['data'] ?? [];
         await HiveHelper.insertEmpleados(widget.empresaId, empleadosData);
+
+        List<dynamic> filtrados = empleadosData
+            .where((emp) => (emp['nombre_razon_social']?.toString().toLowerCase() == selectedContractor?.toLowerCase()))
+            .toList();
+
         setState(() {
-          empleados = empleadosData;
-          filteredEmpleados = empleadosData;
+          allFetchedEmpleados = empleadosData;
+          empleados = filtrados;
+          filteredEmpleados = filtrados;
           showEmployees = true;
         });
       } else {
@@ -826,8 +854,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     if (connectivityResult == ConnectivityResult.none) {
       List<dynamic>? empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales.isNotEmpty) {
+        allEmpleados = empleadosLocales;
         setState(() {
-          empleados = empleadosLocales;
           isLoading = false;
         });
       } else {
@@ -863,8 +891,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
         if (response.statusCode == 200) {
           final responseData = response.data;
-          empleados = responseData['data'] ?? [];
-          await HiveHelper.insertEmpleados(widget.empresaId, empleados);
+          allEmpleados = responseData['data'] ?? [];
+          await HiveHelper.insertEmpleados(widget.empresaId, allEmpleados);
           setState(() {
             isLoading = false;
           });
@@ -906,6 +934,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
+  // Ahora filtramos SOLO por CUIL.
+  // El usuario ingresa algo en el campo de búsqueda y lo que hace el filtro es:
+  // - Parsear el campo 'datos'
+  // - Obtener el CUIL (id: "CUIL:")
+  // - Comparar si el cuil empieza con el texto buscado
   void _filterEmployees() {
     String query = searchController.text.toLowerCase().trim();
     if (query.isEmpty) {
@@ -916,29 +949,24 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       List<dynamic> temp = [];
       for (var empleado in empleados) {
         final datosString = empleado['datos']?.toString() ?? '';
-        String nombre = 'No disponible';
-        String apellido = '';
-
+        String cuilVal = '';
         if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
           try {
             List datosList = jsonDecode(datosString);
-            var apellidoMap = datosList.firstWhere((item) => item['id'] == "Apellido:", orElse: () => null);
-            var nombreMap = datosList.firstWhere((item) => item['id'] == "Nombre:", orElse: () => null);
-
-            if (apellidoMap != null && apellidoMap['valor'] != null && apellidoMap['valor'] is String) {
-              apellido = (apellidoMap['valor'] as String).trim();
+            var cuilMap = datosList.firstWhere(
+              (item) => item['id'] == "CUIL:",
+              orElse: () => null,
+            );
+            if (cuilMap != null && cuilMap['valor'] is String) {
+              cuilVal = (cuilMap['valor'] as String).trim();
             }
-            if (nombreMap != null && nombreMap['valor'] != null && nombreMap['valor'] is String) {
-              String tempNombre = (nombreMap['valor'] as String).trim();
-              if (tempNombre.isNotEmpty) {
-                nombre = tempNombre;
-              }
-            }
-          } catch (e) {}
+          } catch (e) {
+            cuilVal = '';
+          }
         }
 
-        final displayName = "$nombre ${apellido.isNotEmpty ? apellido : ''}".trim().toLowerCase();
-        if (displayName.startsWith(query)) {
+        // Buscamos por cuil
+        if (cuilVal.toLowerCase().startsWith(query)) {
           temp.add(empleado);
         }
       }
@@ -1018,9 +1046,21 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
   }
 
+  List<String> _getContractorsForDropdown() {
+    Set<String> contractors = {};
+    for (var emp in allEmpleados) {
+      if (emp['nombre_razon_social'] != null && emp['nombre_razon_social'].toString().isNotEmpty) {
+        contractors.add(emp['nombre_razon_social'].toString());
+      }
+    }
+    return contractors.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
   @override
   Widget build(BuildContext context) {
     String botonQrText = qrScanned ? "Ingresar con otro QR" : "Ingreso con QR";
+
+    List<String> contractorItems = _getContractorsForDropdown();
 
     return Scaffold(
       appBar: AppBar(
@@ -1141,47 +1181,40 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ),
                           ),
                           const SizedBox(height: 10),
-                          isLoadingContractors
-                              ? const Center(child: CircularProgressIndicator())
-                              : DropdownButtonFormField<String>(
-                                  isExpanded: true,
-                                  items: empleados
-                                      .map((e) => e['nombre_razon_social']?.toString() ?? '')
-                                      .toSet()
-                                      .map<DropdownMenuItem<String>>((nombreRazonSocial) {
-                                    return DropdownMenuItem<String>(
-                                      value: nombreRazonSocial,
-                                      child: Text(
-                                        nombreRazonSocial,
-                                        style: const TextStyle(
-                                          fontFamily: 'Montserrat',
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                        maxLines: 1,
-                                      ),
-                                    );
-                                  }).toList(),
-                                  value: selectedContractor,
-                                  onChanged: (value) {
-                                    if (value != null) {
-                                      updateSelectedContractor(value);
-                                    }
-                                  },
-                                  decoration: InputDecoration(
-                                    contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
-                                    hintText: 'Seleccione Contratista',
-                                    hintStyle: const TextStyle(
-                                      fontFamily: 'Montserrat',
-                                      color: Colors.grey,
-                                    ),
-                                    filled: true,
-                                    fillColor: Colors.grey[200],
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                  ),
+                          DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            items: contractorItems.map<DropdownMenuItem<String>>((nombreRazonSocial) {
+                              return DropdownMenuItem<String>(
+                                value: nombreRazonSocial,
+                                child: Text(
+                                  nombreRazonSocial,
+                                  style: const TextStyle(fontFamily: 'Montserrat'),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
                                 ),
+                              );
+                            }).toList(),
+                            value: selectedContractor,
+                            onChanged: (value) {
+                              if (value != null) {
+                                updateSelectedContractor(value);
+                              }
+                            },
+                            decoration: InputDecoration(
+                              contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                              hintText: 'Seleccione Contratista',
+                              hintStyle: const TextStyle(
+                                fontFamily: 'Montserrat',
+                                color: Colors.grey,
+                              ),
+                              filled: true,
+                              fillColor: Colors.grey[200],
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                          ),
                           const SizedBox(height: 20),
                           const Text(
                             'Número de Identificación Personal',
@@ -1503,7 +1536,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             TextField(
                               controller: searchController,
                               decoration: InputDecoration(
-                                hintText: 'Buscar Empleado',
+                                hintText: 'Buscar por CUIL',
                                 hintStyle: const TextStyle(
                                   fontFamily: 'Montserrat',
                                   color: Colors.grey,
@@ -1529,10 +1562,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             if (filteredEmpleados.isNotEmpty) ...[
                               for (var empleado in filteredEmpleados)
                                 Builder(builder: (context) {
+                                  // Procesar datos para mostrar Apellido Nombre - CUIL
                                   final datosString = empleado['datos']?.toString() ?? '';
-                                  String nombre = 'No disponible';
-                                  String apellido = '';
-
+                                  String displayName = 'No disponible';
+                                  String apellidoVal = '';
+                                  String nombreVal = '';
+                                  String cuilVal = '';
                                   if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
                                     try {
                                       List datosList = jsonDecode(datosString);
@@ -1544,20 +1579,33 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                         (item) => item['id'] == "Nombre:",
                                         orElse: () => null,
                                       );
+                                      var cuilMap = datosList.firstWhere(
+                                        (item) => item['id'] == "CUIL:",
+                                        orElse: () => null,
+                                      );
 
-                                      if (apellidoMap != null && apellidoMap['valor'] != null && apellidoMap['valor'] is String) {
-                                        apellido = (apellidoMap['valor'] as String).trim();
+                                      apellidoVal = (apellidoMap != null && apellidoMap['valor'] is String)
+                                          ? (apellidoMap['valor'] as String).trim()
+                                          : '';
+                                      nombreVal = (nombreMap != null && nombreMap['valor'] is String)
+                                          ? (nombreMap['valor'] as String).trim()
+                                          : '';
+                                      cuilVal = (cuilMap != null && cuilMap['valor'] is String)
+                                          ? (cuilMap['valor'] as String).trim()
+                                          : '';
+
+                                      if (apellidoVal.isEmpty && nombreVal.isEmpty) {
+                                        displayName = "No disponible";
+                                      } else {
+                                        displayName = "$apellidoVal $nombreVal - $cuilVal".trim();
                                       }
-                                      if (nombreMap != null && nombreMap['valor'] != null && nombreMap['valor'] is String) {
-                                        String tempNombre = (nombreMap['valor'] as String).trim();
-                                        if (tempNombre.isNotEmpty) {
-                                          nombre = tempNombre;
-                                        }
-                                      }
-                                    } catch (e) {}
+                                    } catch (e) {
+                                      displayName = "No disponible";
+                                    }
                                   }
 
-                                  final displayName = "$nombre ${apellido.isNotEmpty ? apellido : ''}".trim();
+                                  String estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
+                                  Color textColor = estado == 'habilitado' ? Colors.green : Colors.red;
 
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 8),
@@ -1565,11 +1613,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            "$displayName -",
-                                            style: const TextStyle(
+                                            displayName,
+                                            style: TextStyle(
                                               fontFamily: 'Montserrat',
                                               fontSize: 16,
-                                              color: Colors.black,
+                                              color: textColor,
                                               decoration: TextDecoration.none,
                                             ),
                                           ),
