@@ -33,12 +33,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractorCuit;
   String? selectedContractorTipo;
   String? selectedContractorMensajeGeneral;
+  String? selectedContractorEstado; // <-- Agregado para almacenar el estado del contratista
   bool showContractorInfo = false;
   bool showEmployees = false; 
   List<dynamic> empleados = [];
   List<dynamic> filteredEmpleados = [];
-  List<dynamic> allEmpleados = []; // Lista de todos los empleados cargados inicialmente (proveedores)
-  List<dynamic> allFetchedEmpleados = []; // Lista de todos los empleados obtenidos al presionar "Empleados"
+  List<dynamic> allEmpleados = [];
+  List<dynamic> allFetchedEmpleados = [];
   bool isLoading = true;
   bool isLoadingContractors = false;
 
@@ -62,7 +63,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   void initState() {
     super.initState();
 
-    // Configurar Dio con manejo de cookies
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
@@ -74,7 +74,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     });
 
-    // Leemos el id_usuarios y token desde Hive
     hiveIdUsuarios = HiveHelper.getIdUsuarios();
     hiveBearerToken = HiveHelper.getBearerToken();
 
@@ -119,20 +118,23 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   void updateSelectedContractor(String nombreRazonSocial) {
     if (!mounted) return;
     setState(() {
-      selectedContractor = nombreRazonSocial;
+      final contractorLower = nombreRazonSocial.trim().toLowerCase();
+      selectedContractor = nombreRazonSocial.trim();
       var empleadoSeleccionado = allEmpleados.firstWhere(
-        (empleado) => empleado['nombre_razon_social']?.toString().toLowerCase() == nombreRazonSocial.toLowerCase(),
+        (empleado) => (empleado['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower),
         orElse: () => null,
       );
       selectedContractorCuit = empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
       selectedContractorTipo = empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
       selectedContractorMensajeGeneral = empleadoSeleccionado != null ? empleadoSeleccionado['mensaje_general'] : '';
+      // Ahora también tomamos el estado del contratista:
+      selectedContractorEstado = empleadoSeleccionado != null ? empleadoSeleccionado['estado'] : '';
+
       showContractorInfo = true;
 
-      // Si ya se están mostrando empleados, re-filtramos automáticamente
       if (showEmployees && allFetchedEmpleados.isNotEmpty) {
         List<dynamic> filtrados = allFetchedEmpleados
-            .where((emp) => (emp['nombre_razon_social']?.toString().toLowerCase() == selectedContractor?.toLowerCase()))
+            .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower))
             .toList();
 
         empleados = filtrados;
@@ -747,7 +749,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       Navigator.pop(context);
       List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       List<dynamic> filtrados = empleadosLocales
-          .where((emp) => (emp['nombre_razon_social']?.toString().toLowerCase() == selectedContractor?.toLowerCase()))
+          .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == selectedContractor?.toLowerCase()))
           .toList();
 
       setState(() {
@@ -784,7 +786,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         await HiveHelper.insertEmpleados(widget.empresaId, empleadosData);
 
         List<dynamic> filtrados = empleadosData
-            .where((emp) => (emp['nombre_razon_social']?.toString().toLowerCase() == selectedContractor?.toLowerCase()))
+            .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == selectedContractor?.toLowerCase()))
             .toList();
 
         setState(() {
@@ -934,11 +936,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
-  // Ahora filtramos SOLO por CUIL.
-  // El usuario ingresa algo en el campo de búsqueda y lo que hace el filtro es:
-  // - Parsear el campo 'datos'
-  // - Obtener el CUIL (id: "CUIL:")
-  // - Comparar si el cuil empieza con el texto buscado
   void _filterEmployees() {
     String query = searchController.text.toLowerCase().trim();
     if (query.isEmpty) {
@@ -948,25 +945,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } else {
       List<dynamic> temp = [];
       for (var empleado in empleados) {
-        final datosString = empleado['datos']?.toString() ?? '';
-        String cuilVal = '';
-        if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
-          try {
-            List datosList = jsonDecode(datosString);
-            var cuilMap = datosList.firstWhere(
-              (item) => item['id'] == "CUIL:",
-              orElse: () => null,
-            );
-            if (cuilMap != null && cuilMap['valor'] is String) {
-              cuilVal = (cuilMap['valor'] as String).trim();
-            }
-          } catch (e) {
-            cuilVal = '';
-          }
-        }
-
-        // Buscamos por cuil
-        if (cuilVal.toLowerCase().startsWith(query)) {
+        final dniVal = (empleado['valor']?.toString().trim() ?? '').toLowerCase();
+        if (dniVal.startsWith(query)) {
           temp.add(empleado);
         }
       }
@@ -1049,11 +1029,220 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   List<String> _getContractorsForDropdown() {
     Set<String> contractors = {};
     for (var emp in allEmpleados) {
-      if (emp['nombre_razon_social'] != null && emp['nombre_razon_social'].toString().isNotEmpty) {
-        contractors.add(emp['nombre_razon_social'].toString());
+      if (emp['nombre_razon_social'] != null && emp['nombre_razon_social'].toString().trim().isNotEmpty) {
+        contractors.add(emp['nombre_razon_social'].toString().trim());
       }
     }
     return contractors.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  Future<void> _hacerIngresoEgresoEmpleado(dynamic empleado) async {
+    final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
+    if (estado == 'inhabilitado') {
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Empleado Inhabilitado'),
+            content: const Text('No se puede hacer el ingreso o el egreso para este empleado ya que está inhabilitado.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    final dniVal = (empleado['valor']?.toString().trim() ?? '');
+    if (dniVal.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se encontró DNI del empleado.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final connectivityResult = await connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      await _saveOfflineRequest(dniVal);
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Modo offline'),
+            content: const Text('Se guardó para registrar cuando vuelva la conexión. Mientras tanto, puede ingresar o salir.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    hiveBearerToken = HiveHelper.getBearerToken();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Center(
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text(
+                'Cargando...',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final url = Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
+          .replace(queryParameters: {
+        'id_empresas': widget.empresaId,
+      });
+
+      final response = await dio.get(
+        url.toString(),
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $hiveBearerToken',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+
+      Navigator.pop(context);
+
+      final statusCode = response.statusCode ?? 0;
+      if (statusCode == 200) {
+        final responseData = response.data;
+        List<dynamic> employeesData = responseData['data'] ?? [];
+        final foundEmployee = employeesData.firstWhere(
+          (emp) => emp['valor']?.toString().trim() == dniVal,
+          orElse: () => null,
+        );
+
+        if (foundEmployee != null) {
+          final String estadoEmpleado = foundEmployee['estado']?.toString().trim() ?? '';
+          if (estadoEmpleado.toLowerCase() == 'inhabilitado') {
+            showDialog(
+              context: context,
+              builder: (ctx) {
+                return AlertDialog(
+                  title: const Text('Empleado Inhabilitado'),
+                  content: const Text('No se puede hacer el ingreso o el egreso para este empleado ya que está inhabilitado'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                );
+              },
+            );
+            return;
+          }
+
+          final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
+          await _registerMovement(idEntidad);
+        } else {
+          showDialog(
+            context: context,
+            builder: (ctx) {
+              return AlertDialog(
+                title: const Text('No encontrado'),
+                content: const Text('No se encontró el DNI en la respuesta.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('OK'),
+                  ),
+                ],
+              );
+            },
+          );
+        }
+
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Código de respuesta'),
+              content: Text('El código de respuesta es: $statusCode'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
+
+    } on DioException catch (e) {
+      Navigator.pop(context);
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Error'),
+            content: Text('Error en la solicitud: $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      Navigator.pop(context);
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Error inesperado'),
+            content: Text('Ocurrió un error: $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    }
   }
 
   @override
@@ -1061,6 +1250,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     String botonQrText = qrScanned ? "Ingresar con otro QR" : "Ingreso con QR";
 
     List<String> contractorItems = _getContractorsForDropdown();
+
+    // Determinar estado del contratista por el campo 'estado':
+    bool isContratistaHabilitado = false;
+    if (selectedContractorEstado != null) {
+      final estado = selectedContractorEstado!.trim().toLowerCase();
+      isContratistaHabilitado = estado == 'habilitado';
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -1427,16 +1623,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   Container(
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      color: selectedContractorMensajeGeneral?.toLowerCase().contains('inhabilitado') == true
-                                          ? Colors.red[300]
-                                          : Colors.green[300],
+                                      color: isContratistaHabilitado ? Colors.green[300] : Colors.red[300],
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Center(
                                       child: Text(
-                                        selectedContractorMensajeGeneral?.toLowerCase().contains('inhabilitado') == true
-                                            ? 'CONTRATISTA INHABILITADO'
-                                            : 'CONTRATISTA HABILITADO',
+                                        isContratistaHabilitado
+                                            ? 'CONTRATISTA HABILITADO'
+                                            : 'CONTRATISTA INHABILITADO',
                                         style: const TextStyle(
                                           fontFamily: 'Montserrat',
                                           fontSize: 16,
@@ -1536,7 +1730,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             TextField(
                               controller: searchController,
                               decoration: InputDecoration(
-                                hintText: 'Buscar por CUIL',
+                                hintText: 'Buscar por DNI',
                                 hintStyle: const TextStyle(
                                   fontFamily: 'Montserrat',
                                   color: Colors.grey,
@@ -1562,12 +1756,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             if (filteredEmpleados.isNotEmpty) ...[
                               for (var empleado in filteredEmpleados)
                                 Builder(builder: (context) {
-                                  // Procesar datos para mostrar Apellido Nombre - CUIL
                                   final datosString = empleado['datos']?.toString() ?? '';
                                   String displayName = 'No disponible';
                                   String apellidoVal = '';
                                   String nombreVal = '';
-                                  String cuilVal = '';
+                                  String dniVal = (empleado['valor']?.toString().trim() ?? '');
+
                                   if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
                                     try {
                                       List datosList = jsonDecode(datosString);
@@ -1579,10 +1773,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                         (item) => item['id'] == "Nombre:",
                                         orElse: () => null,
                                       );
-                                      var cuilMap = datosList.firstWhere(
-                                        (item) => item['id'] == "CUIL:",
-                                        orElse: () => null,
-                                      );
 
                                       apellidoVal = (apellidoMap != null && apellidoMap['valor'] is String)
                                           ? (apellidoMap['valor'] as String).trim()
@@ -1590,14 +1780,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                       nombreVal = (nombreMap != null && nombreMap['valor'] is String)
                                           ? (nombreMap['valor'] as String).trim()
                                           : '';
-                                      cuilVal = (cuilMap != null && cuilMap['valor'] is String)
-                                          ? (cuilMap['valor'] as String).trim()
-                                          : '';
 
                                       if (apellidoVal.isEmpty && nombreVal.isEmpty) {
                                         displayName = "No disponible";
                                       } else {
-                                        displayName = "$apellidoVal $nombreVal - $cuilVal".trim();
+                                        displayName = "$apellidoVal $nombreVal - $dniVal".trim();
                                       }
                                     } catch (e) {
                                       displayName = "No disponible";
@@ -1623,7 +1810,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                           ),
                                         ),
                                         ElevatedButton(
-                                          onPressed: _mostrarProximamente,
+                                          onPressed: () => _hacerIngresoEgresoEmpleado(empleado),
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: const Color(0xFF43b6ed),
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

@@ -94,12 +94,14 @@ class _HomeScreenState extends State<HomeScreen> {
       gruposFiltrados = List.from(grupos);
       return;
     }
+
     empresasFiltradas = empresas.where((empresa) {
       return empresa['nombre']
           .toString()
           .toLowerCase()
           .startsWith(_searchQuery);
     }).toList();
+
     gruposFiltrados = grupos.where((grupo) {
       return grupo['nombre']
           .toString()
@@ -219,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
         List<Map<String, dynamic>> empresasData =
             List<Map<String, dynamic>>.from(responseData['data'].map((e) => Map<String,dynamic>.from(e)));
 
-        Set<String> gruposUnicos = {};
+        Set<String> gruposUnicos = {}; // Usar un set vacío con {}
         List<Map<String, dynamic>> gruposData = [];
 
         empresas.clear();
@@ -227,15 +229,21 @@ class _HomeScreenState extends State<HomeScreen> {
         grupos.clear();
         gruposFiltrados.clear();
 
+        // Ahora determinamos que si "grupo" es null o "" es una empresa individual,
+        // si "grupo" tiene valor, significa que pertenece a ese grupo.
         for (var empresa in empresasData) {
           String? grupoNombre = empresa['grupo'];
           String? grupoId = empresa['id_grupos'];
-          if (grupoNombre != null && grupoNombre.isNotEmpty && grupoId != null && grupoId.isNotEmpty && !gruposUnicos.contains(grupoId)) {
-            gruposUnicos.add(grupoId);
-            gruposData.add({
-              'id': grupoId,
-              'nombre': grupoNombre,
-            });
+
+          // Si grupoNombre no es null y no está vacío, significa que esta empresa pertenece a un grupo
+          if (grupoNombre != null && grupoNombre.isNotEmpty && grupoId != null && grupoId.isNotEmpty) {
+            if (!gruposUnicos.contains(grupoId)) {
+              gruposUnicos.add(grupoId);
+              gruposData.add({
+                'id': grupoId,
+                'nombre': grupoNombre,
+              });
+            }
           }
         }
 
@@ -405,14 +413,29 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Ahora tomamos las empresas directamente de 'empresas' en lugar de 'empresasFiltradas'
-  // para asegurar que se muestren las empresas del grupo aunque el filtrado por texto no las incluya.
   List<Map<String, dynamic>> _getEmpresasDelGrupo(String grupoId) {
-    return empresas.where((emp) => emp['id_grupos'] == grupoId).toList();
+    // Tomamos todas las empresas que tienen ese id_grupos y grupo no vacío
+    return empresas.where((emp) => emp['id_grupos'] == grupoId && emp['grupo'] != null && emp['grupo'].toString().isNotEmpty).toList();
+  }
+
+  // Las empresas sin grupo son aquellas con grupo == null o empty
+  List<Map<String, dynamic>> _getEmpresasSinGrupo() {
+    return empresas.where((emp) => emp['grupo'] == null || emp['grupo'].toString().trim().isEmpty).toList();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Primero filtramos las empresas sin grupo
+    List<Map<String, dynamic>> empresasSinGrupoFiltradas = _getEmpresasSinGrupo();
+    if (_searchQuery.isNotEmpty) {
+      empresasSinGrupoFiltradas = empresasSinGrupoFiltradas.where((empresa) {
+        return empresa['nombre']
+            .toString()
+            .toLowerCase()
+            .startsWith(_searchQuery);
+      }).toList();
+    }
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -525,7 +548,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       SizedBox(height: 20),
-                      for (var empresa in empresasFiltradas)
+                      for (var empresa in empresasSinGrupoFiltradas)
                         GestureDetector(
                           onTap: () {
                             id_empresas = empresa['id_empresas'].toString();

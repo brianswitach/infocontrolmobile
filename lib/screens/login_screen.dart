@@ -31,8 +31,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _usernameController.text = '20300444351';
-    _passwordController.text = 'AGus2014';
+    _usernameController.text = '';
+    _passwordController.text = '';
 
     // Configuración de Dio + CookieJar
     cookieJar = CookieJar();
