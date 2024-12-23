@@ -48,6 +48,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Recibimos el token inicial y la lista de empresas, username y password
     bearerToken = widget.bearerToken;
     empresas = widget.empresas;
     empresasFiltradas = widget.empresas;
@@ -56,17 +58,21 @@ class _HomeScreenState extends State<HomeScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
+    // Guardamos el token en Hive
     HiveHelper.storeBearerToken(bearerToken);
 
+    // Inicia la rutina de refresco cada 290s
     _startTokenRefreshTimer();
     _setupConnectivityListener();
     _updateDataFromServer();
     _searchController.addListener(_onSearchChanged);
   }
 
+  // Configura oyente de conectividad
   void _setupConnectivityListener() {
     Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
       if (result == ConnectivityResult.none) {
+        // No hay conexión -> cargamos datos locales
         _loadLocalData().then((_) {
           if (!mounted) return;
           setState(() {
@@ -75,11 +81,13 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         });
       } else {
+        // Hay conexión -> refrescar token
         _refreshBearerToken();
       }
     });
   }
 
+  // Cada vez que cambie el texto de búsqueda, filtramos
   void _onSearchChanged() {
     final query = _searchController.text.toLowerCase().trim();
     setState(() {
@@ -88,6 +96,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // Filtra empresas y grupos según el texto de _searchQuery
   void _filterData() {
     if (_searchQuery.isEmpty) {
       empresasFiltradas = List.from(empresas);
@@ -117,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  // Inicia el Timer para refrescar el token cada 4min 50s (290s)
   void _startTokenRefreshTimer() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(
@@ -125,6 +135,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Lógica de refresco del token usando username y password
   Future<void> _refreshBearerToken() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -138,8 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
         options: Options(
           headers: {
             'Content-Type': 'application/json',
-            'Authorization':
-                'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
+            'Authorization': 'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
           },
         ),
         data: jsonEncode({
@@ -158,7 +168,10 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
 
+        // Guardamos el nuevo token en Hive
         await HiveHelper.storeBearerToken(newToken);
+
+        // Volvemos a actualizar datos con el nuevo token
         await _updateDataFromServer();
       } else {
         throw Exception('Error al actualizar el token: ${response.statusCode}');
@@ -169,6 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Muestra un snackBar en caso de error
   void _showErrorSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -176,6 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Carga datos locales (empresas, grupos) si no hay internet
   Future<void> _loadLocalData() async {
     try {
       List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
@@ -194,12 +209,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Actualiza datos desde el servidor usando el token que tengamos
   Future<void> _updateDataFromServer() async {
     if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
 
+    // Obtenemos el token fresco de Hive
     String currentToken = HiveHelper.getBearerToken();
 
     try {
@@ -221,7 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
         List<Map<String, dynamic>> empresasData =
             List<Map<String, dynamic>>.from(responseData['data'].map((e) => Map<String,dynamic>.from(e)));
 
-        Set<String> gruposUnicos = {}; // Usar un set vacío con {}
+        Set<String> gruposUnicos = {};
         List<Map<String, dynamic>> gruposData = [];
 
         empresas.clear();
@@ -229,13 +246,11 @@ class _HomeScreenState extends State<HomeScreen> {
         grupos.clear();
         gruposFiltrados.clear();
 
-        // Ahora determinamos que si "grupo" es null o "" es una empresa individual,
-        // si "grupo" tiene valor, significa que pertenece a ese grupo.
+        // Agrupamos según "grupo"
         for (var empresa in empresasData) {
           String? grupoNombre = empresa['grupo'];
           String? grupoId = empresa['id_grupos'];
 
-          // Si grupoNombre no es null y no está vacío, significa que esta empresa pertenece a un grupo
           if (grupoNombre != null && grupoNombre.isNotEmpty && grupoId != null && grupoId.isNotEmpty) {
             if (!gruposUnicos.contains(grupoId)) {
               gruposUnicos.add(grupoId);
@@ -247,18 +262,18 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
+        // Guardamos en Hive
         await HiveHelper.insertGrupos(gruposData);
         gruposData = gruposData.map((g) => Map<String,dynamic>.from(g)).toList();
-
         grupos = gruposData;
         gruposFiltrados = gruposData;
 
         await HiveHelper.insertEmpresas(empresasData);
         empresasData = empresasData.map((e) => Map<String,dynamic>.from(e)).toList();
-
         empresas = empresasData;
         empresasFiltradas = empresasData;
 
+        // Control de grupos expandibles
         _expandedGroups.clear();
         for (var g in grupos) {
           _expandedGroups[g['id']] = false;
@@ -288,6 +303,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Prefetch instalaciones en segundo plano
   Future<void> _prefetchInstallationsInBackground() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -312,6 +328,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Descarga e inserta instalaciones de una empresa específica
   Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -334,7 +351,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final responseData = response.data;
-
         List<Map<String, dynamic>> instalacionesData = [];
         if (responseData['data']['instalaciones'] != null) {
           instalacionesData = List<Map<String, dynamic>>.from(
@@ -353,6 +369,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Badge para mostrar tipo de cliente (directo=Integral, renting=Renting)
   Widget _buildTipoClienteBadge(String tipoCliente) {
     final text = tipoCliente == 'directo' ? 'Integral' : 'Renting';
     return Container(
@@ -414,18 +431,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<Map<String, dynamic>> _getEmpresasDelGrupo(String grupoId) {
-    // Tomamos todas las empresas que tienen ese id_grupos y grupo no vacío
-    return empresas.where((emp) => emp['id_grupos'] == grupoId && emp['grupo'] != null && emp['grupo'].toString().isNotEmpty).toList();
+    return empresas.where((emp) =>
+      emp['id_grupos'] == grupoId &&
+      emp['grupo'] != null &&
+      emp['grupo'].toString().isNotEmpty
+    ).toList();
   }
 
-  // Las empresas sin grupo son aquellas con grupo == null o empty
   List<Map<String, dynamic>> _getEmpresasSinGrupo() {
-    return empresas.where((emp) => emp['grupo'] == null || emp['grupo'].toString().trim().isEmpty).toList();
+    return empresas.where((emp) =>
+      emp['grupo'] == null || emp['grupo'].toString().trim().isEmpty
+    ).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Primero filtramos las empresas sin grupo
+    // Filtra las empresas sin grupo que coincidan con la búsqueda
     List<Map<String, dynamic>> empresasSinGrupoFiltradas = _getEmpresasSinGrupo();
     if (_searchQuery.isNotEmpty) {
       empresasSinGrupoFiltradas = empresasSinGrupoFiltradas.where((empresa) {
@@ -529,6 +550,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         GestureDetector(
                           onTap: () {
                             id_empresas = empresa['id_empresas'].toString();
+                            // Pasamos bearerToken al EmpresaScreen
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -661,7 +683,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             MaterialPageRoute(
                                               builder: (context) => EmpresaScreen(
                                                 empresaId: id_empresas,
-                                                bearerToken: bearerToken,
+                                                bearerToken: bearerToken, // Token actualizado
                                                 empresaData: emp,
                                               ),
                                             ),

@@ -11,7 +11,7 @@ import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
-  final String bearerToken;
+  final String bearerToken;       // token que llega desde EmpresaScreen, pero NO se usará en requests
   final String idEmpresaAsociada;
   final String empresaId;
   final bool openScannerOnInit;
@@ -34,7 +34,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractorCuit;
   String? selectedContractorTipo;
   String? selectedContractorMensajeGeneral;
-  String? selectedContractorEstado; // <-- Almacena el estado del contratista
+  String? selectedContractorEstado; 
   bool showContractorInfo = false;
   bool showEmployees = false; 
   List<dynamic> empleados = [];
@@ -42,7 +42,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   List<dynamic> allEmpleados = [];
   List<dynamic> allFetchedEmpleados = [];
   bool isLoading = true;
-  bool isLoadingContractors = false;
 
   final MobileScannerController controladorCamara = MobileScannerController();
   final TextEditingController personalIdController = TextEditingController();
@@ -58,16 +57,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   late StreamSubscription<ConnectivityResult> connectivitySubscription;
 
   String hiveIdUsuarios = '';
-  String hiveBearerToken = '';
 
   // Mapa para almacenar si un empleado está actualmente dentro (true) o fuera (false).
-  // La clave será el id_entidad (identificador único del empleado en el sistema).
   Map<String, bool> employeeInsideStatus = {};
-
-  // Variables para manejar el token temporal
-  String currentBearerToken = '';
-  Timer? tempTokenTimer;
-  bool isUsingTempToken = false;
 
   @override
   void initState() {
@@ -85,11 +77,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     });
 
     hiveIdUsuarios = HiveHelper.getIdUsuarios();
-    hiveBearerToken = HiveHelper.getBearerToken();
 
-    // Al inicio, el bearer token actual será el de hive
-    currentBearerToken = hiveBearerToken;
-
+    // NO guardamos token en variable. Se obtendrá directamente de Hive en cada request
     searchController.addListener(_filterEmployees);
 
     obtenerEmpleados().then((_) {
@@ -106,7 +95,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     dominioController.dispose();
     searchController.dispose();
     connectivitySubscription.cancel();
-    tempTokenTimer?.cancel();
     super.dispose();
   }
 
@@ -130,10 +118,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   void updateSelectedContractor(String nombreRazonSocial) {
-    if (!mounted) return;
     setState(() {
       final contractorLower = nombreRazonSocial.trim().toLowerCase();
       selectedContractor = nombreRazonSocial.trim();
+
       var empleadoSeleccionado = allEmpleados.firstWhere(
         (empleado) => (empleado['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower),
         orElse: () => null,
@@ -170,7 +158,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     final List<Map<String, dynamic>> pendingRequests = HiveHelper.getAllPendingDNIRequests();
     if (pendingRequests.isEmpty) return;
 
-    // Usamos el currentBearerToken
     for (var requestData in pendingRequests) {
       final String dniIngresado = requestData["dni"] ?? '';
       final String idEmpresas = requestData["id_empresas"] ?? '';
@@ -179,6 +166,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       if (dniIngresado.isEmpty) continue;
 
       try {
+        // Para cada GET, tomamos el token fresco de Hive
         final response = await _makeGetRequest(
           "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
           queryParameters: {'id_empresas': idEmpresas},
@@ -221,6 +209,63 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
+  Future<void> _hacerIngresoEgresoEmpleado(dynamic empleado) async {
+    final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
+    if (estado == 'inhabilitado') {
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Empleado Inhabilitado'),
+            content: const Text('No se puede hacer el ingreso o egreso para este empleado.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    final dniVal = (empleado['valor']?.toString().trim() ?? '');
+    if (dniVal.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se encontró DNI del empleado.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final connectivityResult = await connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      await _saveOfflineRequest(dniVal);
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Modo offline'),
+            content: const Text('Se guardó para registrar cuando vuelva la conexión.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
+    await _registerMovement(idEntidad);
+  }
+
   Future<void> _buscarPersonalId() async {
     final texto = personalIdController.text.trim();
     if (texto.isEmpty) {
@@ -243,7 +288,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         builder: (ctx) {
           return AlertDialog(
             title: const Text('Modo offline'),
-            content: const Text('Se guardó para registrar cuando vuelva la conexión. Mientras tanto, puede ingresar o salir.'),
+            content: const Text('Se guardó para registrar cuando vuelva la conexión.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -256,6 +301,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
+    // Mostrar "Cargando..."
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -306,7 +352,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         );
 
         if (foundEmployee != null) {
-          // Mostrar modal con datos del empleado
           _showEmpleadoDetailsModal(foundEmployee);
         } else {
           showDialog(
@@ -345,10 +390,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     } on DioException catch (e) {
       Navigator.pop(context);
-      // Si el status code es 401, manejar
       if (e.response?.statusCode == 401) {
-        await _handle401Error();
-        _buscarPersonalId(); // Reintentar la solicitud
+        // Si el token no es válido, mostramos un SnackBar
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Token inválido. Vuelva a HomeScreen para recargar.')),
+        );
       } else {
         showDialog(
           context: context,
@@ -387,6 +433,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> _registerMovement(String idEntidad) async {
+    // Mostrar "Cargando..."
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -438,7 +485,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         final dynamic dataObject = fullResponse['data'] ?? {};
         final String messageToShow = dataObject['message'] ?? 'Mensaje no disponible';
 
-        // Alternar estado del empleado
         bool isInside = employeeInsideStatus[idEntidad] ?? false;
         employeeInsideStatus[idEntidad] = !isInside;
 
@@ -477,8 +523,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        await _handle401Error();
-        _registerMovement(idEntidad); // Reintentar la solicitud después de obtener nuevo token
+        // Token inválido
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Token inválido en POST. Vuelva a HomeScreen para recargar.')),
+        );
       } else {
         showDialog(
           context: context,
@@ -523,7 +571,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       MaterialPageRoute(
         builder: (context) => LupaEmpresaScreen(
           empresa: widget.empresa,
-          bearerToken: hiveBearerToken,
+          bearerToken: widget.bearerToken, // se pasa el que venía, pero no se usa en requests
           idEmpresaAsociada: widget.idEmpresaAsociada,
           empresaId: widget.empresaId,
           openScannerOnInit: true,
@@ -545,6 +593,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
+    // Mostrar "Cargando..."
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -597,6 +646,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         return;
       }
 
+      // Token fresco de Hive
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
         queryParameters: {'id_empresas': widget.empresaId},
@@ -622,8 +672,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        await _handle401Error();
-        _buscarDominio(); // Reintentar la solicitud
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Token inválido en GET. Vuelva a HomeScreen para recargar.')),
+        );
       } else {
         showDialog(
           context: context,
@@ -672,6 +723,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
+    // Mostrar "Cargando..."
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -703,6 +755,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
 
     try {
+      // Token fresco de Hive
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
         queryParameters: {'id_empresas': widget.empresaId},
@@ -745,8 +798,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        await _handle401Error();
-        _fetchEmpleadosAPI(); // Reintentar
+        // Token inválido
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Token inválido en Empleados. Vuelva a HomeScreen para recargar.')),
+        );
       } else {
         showDialog(
           context: context,
@@ -787,7 +842,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   Future<void> obtenerEmpleados() async {
     var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      List<dynamic>? empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
+      List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales.isNotEmpty) {
         allEmpleados = empleadosLocales;
         setState(() {
@@ -807,6 +862,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     } else {
       try {
+        // Token fresco de Hive
         final response = await _makeGetRequest(
           'https://www.infocontrol.tech/web/api/mobile/proveedores/listar',
           queryParameters: {
@@ -839,8 +895,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         });
         if (!mounted) return;
         if (e.response?.statusCode == 401) {
-          await _handle401Error();
-          obtenerEmpleados(); // Reintentar luego de obtener token
+          // Token inválido
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Token inválido en ObtenerEmpleados. Vuelva a HomeScreen para recargar.')),
+          );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -942,7 +1000,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                         setState(() {
                           qrScanned = true;
                         });
-                      } catch (e) {}
+                      } catch (_) {}
                     }
                   },
                 ),
@@ -957,11 +1015,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   List<String> _getContractorsForDropdown() {
     Set<String> contractors = {};
     for (var emp in allEmpleados) {
-      if (emp['nombre_razon_social'] != null && emp['nombre_razon_social'].toString().trim().isNotEmpty) {
-        contractors.add(emp['nombre_razon_social'].toString().trim());
+      final nombre = emp['nombre_razon_social']?.toString().trim() ?? '';
+      if (nombre.isNotEmpty) {
+        contractors.add(nombre);
       }
     }
-    return contractors.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    List<String> sorted = contractors.toList();
+    sorted.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return sorted;
   }
 
   void _showEmpleadoDetailsModal(dynamic empleado) {
@@ -991,9 +1052,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         nombreVal = (nombreMap != null && nombreMap['valor'] is String)
             ? (nombreMap['valor'] as String).trim()
             : '';
-      } catch (e) {
-        // Si hay error en el parseo, dejar los valores vacíos
-      }
+      } catch (_) {}
     }
 
     final displayName = (apellidoVal.isEmpty && nombreVal.isEmpty)
@@ -1001,7 +1060,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         : "$apellidoVal $nombreVal";
 
     final contratistaSeleccionado = selectedContractor ?? 'No disponible';
-
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
@@ -1085,204 +1143,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
   }
 
-  Future<void> _hacerIngresoEgresoEmpleado(dynamic empleado) async {
-    final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
-    if (estado == 'inhabilitado') {
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Empleado Inhabilitado'),
-            content: const Text('No se puede hacer el ingreso o el egreso para este empleado ya que está inhabilitado.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-      return;
-    }
-
-    final dniVal = (empleado['valor']?.toString().trim() ?? '');
-    if (dniVal.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se encontró DNI del empleado.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    final connectivityResult = await connectivity.checkConnectivity();
-    if (connectivityResult == ConnectivityResult.none) {
-      await _saveOfflineRequest(dniVal);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Modo offline'),
-            content: const Text('Se guardó para registrar cuando vuelva la conexión. Mientras tanto, puede ingresar o salir.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-      return;
-    }
-
-    final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
-
-    // Registrar el movimiento
-    await _registerMovement(idEntidad);
-  }
-
-  // Manejo de error 401: mostrar dialogo para ingresar credenciales, obtener nuevo token temporal.
-  Future<void> _handle401Error() async {
-    // Mostrar "Cargando..." mientras se solicita credenciales
-    // Luego mostrar un modal con campos usuario y contraseña
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        String username = '';
-        String password = '';
-        bool isLoadingLogin = false;
-
-        return StatefulBuilder(builder: (context, setState) {
-          return AlertDialog(
-            title: const Text('Vuelva a ingresar sus credenciales'),
-            content: isLoadingLogin
-                ? Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      CircularProgressIndicator(),
-                      SizedBox(width: 16),
-                      Text('Cargando...')
-                    ],
-                  )
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        decoration: const InputDecoration(
-                          labelText: 'Usuario',
-                        ),
-                        onChanged: (val) {
-                          username = val.trim();
-                        },
-                      ),
-                      TextField(
-                        decoration: const InputDecoration(
-                          labelText: 'Contraseña',
-                        ),
-                        obscureText: true,
-                        onChanged: (val) {
-                          password = val.trim();
-                        },
-                      ),
-                    ],
-                  ),
-            actions: [
-              if (!isLoadingLogin)
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Cancelar'),
-                ),
-              if (!isLoadingLogin)
-                TextButton(
-                  onPressed: () async {
-                    if (username.isEmpty || password.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Complete usuario y contraseña')),
-                      );
-                      return;
-                    }
-                    setState(() {
-                      isLoadingLogin = true;
-                    });
-
-                    try {
-                      final basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
-                      // Hacer la solicitud de login
-                      final dioLogin = Dio();
-                      final loginResponse = await dioLogin.get(
-                        'https://www.infocontrol.tech/web/api/mobile/service/login',
-                        options: Options(
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': basicAuth,
-                          },
-                        ),
-                      );
-
-                      final statusCode = loginResponse.statusCode ?? 0;
-                      if (statusCode == 200 && loginResponse.data['status'] == true) {
-                        final bearer = loginResponse.data['data']['Bearer'] ?? '';
-                        if (bearer.isNotEmpty) {
-                          // Guardar token temporal
-                          setState(() {
-                            currentBearerToken = bearer;
-                            isUsingTempToken = true;
-                          });
-                          // Iniciar timer para volver a usar token de hive despues de 290 segundos
-                          tempTokenTimer?.cancel();
-                          tempTokenTimer = Timer(Duration(seconds: 290), () {
-                            if (mounted) {
-                              setState(() {
-                                currentBearerToken = hiveBearerToken;
-                                isUsingTempToken = false;
-                              });
-                            }
-                          });
-                          Navigator.of(ctx).pop();
-                        } else {
-                          setState(() {
-                            isLoadingLogin = false;
-                          });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('No se obtuvo Bearer token')),
-                          );
-                        }
-                      } else {
-                        setState(() {
-                          isLoadingLogin = false;
-                        });
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error al iniciar sesión: ${loginResponse.data['message'] ?? 'Desconocido'}')),
-                        );
-                      }
-                    } catch (e) {
-                      setState(() {
-                        isLoadingLogin = false;
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Error al iniciar sesión: $e')),
-                      );
-                    }
-                  },
-                  child: const Text('Ingresar'),
-                ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
+  // Cada GET/POST obtiene el token fresco de Hive
   Future<Response> _makeGetRequest(String url, {Map<String, dynamic>? queryParameters}) async {
+    String freshToken = HiveHelper.getBearerToken();
     return await dio.get(
       Uri.parse(url).replace(queryParameters: queryParameters).toString(),
       options: Options(
         headers: {
-          'Authorization': 'Bearer $currentBearerToken',
+          'Authorization': 'Bearer $freshToken',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
@@ -1291,12 +1159,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<Response> _makePostRequest(String url, Map<String, dynamic> data) async {
+    String freshToken = HiveHelper.getBearerToken();
     return await dio.post(
       url,
       data: jsonEncode(data),
       options: Options(
         headers: {
-          'Authorization': 'Bearer $currentBearerToken',
+          'Authorization': 'Bearer $freshToken',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
@@ -1820,7 +1689,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                   String nombreVal = '';
                                   String dniVal = (empleado['valor']?.toString().trim() ?? '');
 
-                                  if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
+                                  if (datosString.isNotEmpty &&
+                                      datosString.startsWith('[') &&
+                                      datosString.endsWith(']')) {
                                     try {
                                       List datosList = jsonDecode(datosString);
                                       var apellidoMap = datosList.firstWhere(
@@ -1844,7 +1715,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                       } else {
                                         displayName = "$apellidoVal $nombreVal - $dniVal".trim();
                                       }
-                                    } catch (e) {
+                                    } catch (_) {
                                       displayName = "No disponible";
                                     }
                                   }

@@ -9,7 +9,7 @@ import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 class EmpresaScreen extends StatefulWidget {
   final String empresaId;  // id_empresas
-  final String bearerToken;
+  final String bearerToken; // <--- Recibe el token actualizado desde HomeScreen
   final Map<String, dynamic> empresaData;
 
   EmpresaScreen({
@@ -92,6 +92,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
     }
   }
 
+  // Utiliza el bearer token que llega por parámetro
   Future<void> _fetchInstalacionesFromServer() async {
     try {
       final response = await dio.get(
@@ -188,12 +189,13 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
             IconButton(
               icon: Icon(Icons.search, color: Color(0xFF2a3666)),
               onPressed: () {
+                // Navegamos a LupaEmpresaScreen pasando el token que recibimos
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => LupaEmpresaScreen(
                       empresaId: widget.empresaId,
-                      bearerToken: widget.bearerToken,
+                      bearerToken: widget.bearerToken, // Pasa el mismo token
                       idEmpresaAsociada: widget.empresaId,
                       empresa: widget.empresaData,
                     ),
@@ -276,6 +278,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               Center(
                 child: OutlinedButton(
                   onPressed: () {
+                    // Vuelve al HomeScreen
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(
