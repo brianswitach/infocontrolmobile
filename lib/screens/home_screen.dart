@@ -503,29 +503,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       SizedBox(height: 20),
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: _showPendingMessages,
-                            onChanged: (bool? value) {
-                              if (!mounted) return;
-                              setState(() {
-                                _showPendingMessages = value ?? false;
-                              });
-                            },
-                          ),
-                          Text(
-                            'Ver pendientes y mensajes',
-                            style: TextStyle(
-                              color: Color(0xFF363f77),
-                              fontFamily: 'Montserrat',
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              decoration: TextDecoration.none,
-                            ),
-                          ),
-                        ],
-                      ),
                       SizedBox(height: 20),
                       Text(
                         'Empresas',

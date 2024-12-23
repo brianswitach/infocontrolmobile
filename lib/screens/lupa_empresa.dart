@@ -1,11 +1,12 @@
 import 'dart:async'; // <-- IMPORTANTE para StreamSubscription
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
-import 'dart:convert';
 import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
@@ -33,7 +34,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractorCuit;
   String? selectedContractorTipo;
   String? selectedContractorMensajeGeneral;
-  String? selectedContractorEstado; // <-- Agregado para almacenar el estado del contratista
+  String? selectedContractorEstado; // <-- Almacena el estado del contratista
   bool showContractorInfo = false;
   bool showEmployees = false; 
   List<dynamic> empleados = [];
@@ -59,6 +60,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String hiveIdUsuarios = '';
   String hiveBearerToken = '';
 
+  // Mapa para almacenar si un empleado está actualmente dentro (true) o fuera (false).
+  // La clave será el id_entidad (identificador único del empleado en el sistema).
+  Map<String, bool> employeeInsideStatus = {};
+
+  // Variables para manejar el token temporal
+  String currentBearerToken = '';
+  Timer? tempTokenTimer;
+  bool isUsingTempToken = false;
+
   @override
   void initState() {
     super.initState();
@@ -77,6 +87,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     hiveIdUsuarios = HiveHelper.getIdUsuarios();
     hiveBearerToken = HiveHelper.getBearerToken();
 
+    // Al inicio, el bearer token actual será el de hive
+    currentBearerToken = hiveBearerToken;
+
     searchController.addListener(_filterEmployees);
 
     obtenerEmpleados().then((_) {
@@ -93,6 +106,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     dominioController.dispose();
     searchController.dispose();
     connectivitySubscription.cancel();
+    tempTokenTimer?.cancel();
     super.dispose();
   }
 
@@ -127,7 +141,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       selectedContractorCuit = empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
       selectedContractorTipo = empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
       selectedContractorMensajeGeneral = empleadoSeleccionado != null ? empleadoSeleccionado['mensaje_general'] : '';
-      // Ahora también tomamos el estado del contratista:
       selectedContractorEstado = empleadoSeleccionado != null ? empleadoSeleccionado['estado'] : '';
 
       showContractorInfo = true;
@@ -157,8 +170,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     final List<Map<String, dynamic>> pendingRequests = HiveHelper.getAllPendingDNIRequests();
     if (pendingRequests.isEmpty) return;
 
-    hiveBearerToken = HiveHelper.getBearerToken();
-
+    // Usamos el currentBearerToken
     for (var requestData in pendingRequests) {
       final String dniIngresado = requestData["dni"] ?? '';
       final String idEmpresas = requestData["id_empresas"] ?? '';
@@ -167,16 +179,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       if (dniIngresado.isEmpty) continue;
 
       try {
-        final response = await dio.get(
-          Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
-              .replace(queryParameters: {'id_empresas': idEmpresas}).toString(),
-          options: Options(
-            headers: {
-              'Authorization': 'Bearer $hiveBearerToken',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-          ),
+        final response = await _makeGetRequest(
+          "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+          queryParameters: {'id_empresas': idEmpresas},
         );
 
         final statusCode = response.statusCode ?? 0;
@@ -191,7 +196,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
             final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
             final String estado = foundEmployee['estado']?.toString().trim() ?? '';
             if (estado.toLowerCase() == 'inhabilitado') {
-              print("Pendiente no procesado, empleado inhabilitado: $dniIngresado");
               continue;
             }
 
@@ -201,27 +205,18 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
               'id_entidad': idEntidad,
             };
 
-            final postUrl = "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement";
-            final postResponse = await dio.post(
-              postUrl,
-              data: jsonEncode(postData),
-              options: Options(
-                headers: {
-                  'Authorization': 'Bearer $hiveBearerToken',
-                  'Content-Type': 'application/json',
-                  'Accept': 'application/json',
-                },
-              ),
+            final postResponse = await _makePostRequest(
+              "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+              postData,
             );
 
             if ((postResponse.statusCode ?? 0) == 200) {
               HiveHelper.removePendingDNIRequest(requestData);
-              print("Pendiente procesado correctamente para el DNI: $dniIngresado");
             }
           }
         }
       } catch (e) {
-        print("Error procesando pendiente offline: $e");
+        // Error procesando pendiente offline
       }
     }
   }
@@ -261,8 +256,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    hiveBearerToken = HiveHelper.getBearerToken();
-
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -294,20 +287,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
 
     try {
-      final url = Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
-          .replace(queryParameters: {
-        'id_empresas': widget.empresaId,
-      });
-
-      final response = await dio.get(
-        url.toString(),
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $hiveBearerToken',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
+      final response = await _makeGetRequest(
+        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+        queryParameters: {'id_empresas': widget.empresaId},
       );
 
       Navigator.pop(context);
@@ -324,28 +306,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         );
 
         if (foundEmployee != null) {
-          final String estado = foundEmployee['estado']?.toString().trim() ?? '';
-          if (estado.toLowerCase() == 'inhabilitado') {
-            showDialog(
-              context: context,
-              builder: (ctx) {
-                return AlertDialog(
-                  title: const Text('Empleado Inhabilitado'),
-                  content: const Text('No se puede hacer el ingreso o el egreso para este empleado ya que está inhabilitado'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('OK'),
-                    ),
-                  ],
-                );
-              },
-            );
-            return;
-          }
-
-          final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
-          await _registerMovement(idEntidad);
+          // Mostrar modal con datos del empleado
+          _showEmpleadoDetailsModal(foundEmployee);
         } else {
           showDialog(
             context: context,
@@ -364,6 +326,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           );
         }
       } else {
+        // statusCode != 200
         showDialog(
           context: context,
           builder: (ctx) {
@@ -382,21 +345,27 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     } on DioException catch (e) {
       Navigator.pop(context);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Error'),
-            content: Text('Error en la solicitud: $e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
+      // Si el status code es 401, manejar
+      if (e.response?.statusCode == 401) {
+        await _handle401Error();
+        _buscarPersonalId(); // Reintentar la solicitud
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Error'),
+              content: Text('Error en la solicitud: $e'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
     } catch (e) {
       Navigator.pop(context);
       showDialog(
@@ -418,8 +387,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> _registerMovement(String idEntidad) async {
-    hiveBearerToken = HiveHelper.getBearerToken();
-
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -457,17 +424,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         'id_entidad': idEntidad,
       };
 
-      final postUrl = "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement";
-      final postResponse = await dio.post(
-        postUrl,
-        data: jsonEncode(postData),
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $hiveBearerToken',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
+      final postResponse = await _makePostRequest(
+        "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+        postData,
       );
 
       Navigator.pop(context);
@@ -478,6 +437,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       if (statusCode == 200) {
         final dynamic dataObject = fullResponse['data'] ?? {};
         final String messageToShow = dataObject['message'] ?? 'Mensaje no disponible';
+
+        // Alternar estado del empleado
+        bool isInside = employeeInsideStatus[idEntidad] ?? false;
+        employeeInsideStatus[idEntidad] = !isInside;
 
         showDialog(
           context: context,
@@ -513,21 +476,26 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     } on DioException catch (e) {
       Navigator.pop(context);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Error al registrar movimiento'),
-            content: Text('Error en la solicitud POST: ${e.toString()}'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
+      if (e.response?.statusCode == 401) {
+        await _handle401Error();
+        _registerMovement(idEntidad); // Reintentar la solicitud después de obtener nuevo token
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Error al registrar movimiento'),
+              content: Text('Error en la solicitud POST: ${e.toString()}'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
     } catch (e) {
       Navigator.pop(context);
       showDialog(
@@ -576,8 +544,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       );
       return;
     }
-
-    hiveBearerToken = HiveHelper.getBearerToken();
 
     showDialog(
       context: context,
@@ -631,20 +597,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         return;
       }
 
-      final url = Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
-          .replace(queryParameters: {
-        'id_empresas': widget.empresaId,
-      });
-
-      final response = await dio.get(
-        url.toString(),
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $hiveBearerToken',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
+      final response = await _makeGetRequest(
+        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+        queryParameters: {'id_empresas': widget.empresaId},
       );
 
       Navigator.pop(context);
@@ -666,21 +621,26 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       );
     } on DioException catch (e) {
       Navigator.pop(context);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Error'),
-            content: Text('Error en la solicitud: $e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
+      if (e.response?.statusCode == 401) {
+        await _handle401Error();
+        _buscarDominio(); // Reintentar la solicitud
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Error'),
+              content: Text('Error en la solicitud: $e'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
     } catch (e) {
       Navigator.pop(context);
       showDialog(
@@ -742,40 +702,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       ),
     );
 
-    hiveBearerToken = HiveHelper.getBearerToken();
-
-    var connectivityResult = await connectivity.checkConnectivity();
-    if (connectivityResult == ConnectivityResult.none) {
-      Navigator.pop(context);
-      List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
-      List<dynamic> filtrados = empleadosLocales
-          .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == selectedContractor?.toLowerCase()))
-          .toList();
-
-      setState(() {
-        allFetchedEmpleados = empleadosLocales;
-        empleados = filtrados;
-        filteredEmpleados = filtrados;
-        showEmployees = true;
-      });
-      return;
-    }
-
     try {
-      final url = Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
-          .replace(queryParameters: {
-        'id_empresas': widget.empresaId,
-      });
-
-      final response = await dio.get(
-        url.toString(),
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $hiveBearerToken',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
+      final response = await _makeGetRequest(
+        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+        queryParameters: {'id_empresas': widget.empresaId},
       );
 
       Navigator.pop(context);
@@ -814,21 +744,26 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     } on DioException catch (e) {
       Navigator.pop(context);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Error'),
-            content: Text('Error en la solicitud: $e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
+      if (e.response?.statusCode == 401) {
+        await _handle401Error();
+        _fetchEmpleadosAPI(); // Reintentar
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Error'),
+              content: Text('Error en la solicitud: $e'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
     } catch (e) {
       Navigator.pop(context);
       showDialog(
@@ -850,8 +785,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<void> obtenerEmpleados() async {
-    hiveBearerToken = HiveHelper.getBearerToken();
-
     var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       List<dynamic>? empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
@@ -874,21 +807,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     } else {
       try {
-        final url = Uri.parse(
+        final response = await _makeGetRequest(
           'https://www.infocontrol.tech/web/api/mobile/proveedores/listar',
-        ).replace(queryParameters: {
-          'id_empresas': widget.idEmpresaAsociada,
-        });
-
-        final response = await dio.get(
-          url.toString(),
-          options: Options(
-            headers: {
-              'Authorization': 'Bearer $hiveBearerToken',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-          ),
+          queryParameters: {
+            'id_empresas': widget.idEmpresaAsociada,
+          },
         );
 
         if (response.statusCode == 200) {
@@ -915,12 +838,17 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           isLoading = false;
         });
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error en la solicitud: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (e.response?.statusCode == 401) {
+          await _handle401Error();
+          obtenerEmpleados(); // Reintentar luego de obtener token
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error en la solicitud: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       } catch (e) {
         setState(() {
           isLoading = false;
@@ -1036,6 +964,127 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     return contractors.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   }
 
+  void _showEmpleadoDetailsModal(dynamic empleado) {
+    final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
+    final bool isHabilitado = estado == 'habilitado';
+
+    final datosString = empleado['datos']?.toString() ?? '';
+    String apellidoVal = '';
+    String nombreVal = '';
+    String dniVal = (empleado['valor']?.toString().trim() ?? '');
+
+    if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
+      try {
+        List datosList = jsonDecode(datosString);
+        var apellidoMap = datosList.firstWhere(
+          (item) => item['id'] == "Apellido:",
+          orElse: () => null,
+        );
+        var nombreMap = datosList.firstWhere(
+          (item) => item['id'] == "Nombre:",
+          orElse: () => null,
+        );
+
+        apellidoVal = (apellidoMap != null && apellidoMap['valor'] is String)
+            ? (apellidoMap['valor'] as String).trim()
+            : '';
+        nombreVal = (nombreMap != null && nombreMap['valor'] is String)
+            ? (nombreMap['valor'] as String).trim()
+            : '';
+      } catch (e) {
+        // Si hay error en el parseo, dejar los valores vacíos
+      }
+    }
+
+    final displayName = (apellidoVal.isEmpty && nombreVal.isEmpty)
+        ? "No disponible"
+        : "$apellidoVal $nombreVal";
+
+    final contratistaSeleccionado = selectedContractor ?? 'No disponible';
+
+    final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
+    bool isInside = employeeInsideStatus[idEntidad] ?? false;
+    String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          content: SingleChildScrollView(
+            child: Column(
+              children: [
+                Image.asset('assets/generic.jpg', width: 80, height: 80),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: isHabilitado ? Colors.green : Colors.red,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isHabilitado ? 'HABILITADO' : 'INHABILITADO',
+                    style: const TextStyle(
+                      fontFamily: 'Montserrat',
+                      fontSize: 16,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Nombre: $displayName',
+                      style: const TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        color: Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Dni: $dniVal',
+                      style: const TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        color: Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Contratista: $contratistaSeleccionado',
+                      style: const TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cerrar', style: TextStyle(fontFamily: 'Montserrat')),
+            ),
+            if (isHabilitado)
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _hacerIngresoEgresoEmpleado(empleado);
+                },
+                child: Text(buttonText, style: const TextStyle(fontFamily: 'Montserrat')),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _hacerIngresoEgresoEmpleado(dynamic empleado) async {
     final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
     if (estado == 'inhabilitado') {
@@ -1089,160 +1138,170 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    hiveBearerToken = HiveHelper.getBearerToken();
+    final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
 
-    showDialog(
+    // Registrar el movimiento
+    await _registerMovement(idEntidad);
+  }
+
+  // Manejo de error 401: mostrar dialogo para ingresar credenciales, obtener nuevo token temporal.
+  Future<void> _handle401Error() async {
+    // Mostrar "Cargando..." mientras se solicita credenciales
+    // Luego mostrar un modal con campos usuario y contraseña
+    await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => Center(
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text(
-                'Cargando...',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  color: Colors.black,
-                  decoration: TextDecoration.none,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+      builder: (ctx) {
+        String username = '';
+        String password = '';
+        bool isLoadingLogin = false;
 
-    try {
-      final url = Uri.parse("https://www.infocontrol.tech/web/api/mobile/empleados/listartest")
-          .replace(queryParameters: {
-        'id_empresas': widget.empresaId,
-      });
-
-      final response = await dio.get(
-        url.toString(),
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $hiveBearerToken',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
-      );
-
-      Navigator.pop(context);
-
-      final statusCode = response.statusCode ?? 0;
-      if (statusCode == 200) {
-        final responseData = response.data;
-        List<dynamic> employeesData = responseData['data'] ?? [];
-        final foundEmployee = employeesData.firstWhere(
-          (emp) => emp['valor']?.toString().trim() == dniVal,
-          orElse: () => null,
-        );
-
-        if (foundEmployee != null) {
-          final String estadoEmpleado = foundEmployee['estado']?.toString().trim() ?? '';
-          if (estadoEmpleado.toLowerCase() == 'inhabilitado') {
-            showDialog(
-              context: context,
-              builder: (ctx) {
-                return AlertDialog(
-                  title: const Text('Empleado Inhabilitado'),
-                  content: const Text('No se puede hacer el ingreso o el egreso para este empleado ya que está inhabilitado'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('OK'),
-                    ),
-                  ],
-                );
-              },
-            );
-            return;
-          }
-
-          final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
-          await _registerMovement(idEntidad);
-        } else {
-          showDialog(
-            context: context,
-            builder: (ctx) {
-              return AlertDialog(
-                title: const Text('No encontrado'),
-                content: const Text('No se encontró el DNI en la respuesta.'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    child: const Text('OK'),
+        return StatefulBuilder(builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Vuelva a ingresar sus credenciales'),
+            content: isLoadingLogin
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      CircularProgressIndicator(),
+                      SizedBox(width: 16),
+                      Text('Cargando...')
+                    ],
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        decoration: const InputDecoration(
+                          labelText: 'Usuario',
+                        ),
+                        onChanged: (val) {
+                          username = val.trim();
+                        },
+                      ),
+                      TextField(
+                        decoration: const InputDecoration(
+                          labelText: 'Contraseña',
+                        ),
+                        obscureText: true,
+                        onChanged: (val) {
+                          password = val.trim();
+                        },
+                      ),
+                    ],
                   ),
-                ],
-              );
-            },
-          );
-        }
-
-      } else {
-        showDialog(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              title: const Text('Código de respuesta'),
-              content: Text('El código de respuesta es: $statusCode'),
-              actions: [
+            actions: [
+              if (!isLoadingLogin)
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('OK'),
+                  child: const Text('Cancelar'),
                 ),
-              ],
-            );
-          },
-        );
-      }
+              if (!isLoadingLogin)
+                TextButton(
+                  onPressed: () async {
+                    if (username.isEmpty || password.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Complete usuario y contraseña')),
+                      );
+                      return;
+                    }
+                    setState(() {
+                      isLoadingLogin = true;
+                    });
 
-    } on DioException catch (e) {
-      Navigator.pop(context);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Error'),
-            content: Text('Error en la solicitud: $e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
+                    try {
+                      final basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
+                      // Hacer la solicitud de login
+                      final dioLogin = Dio();
+                      final loginResponse = await dioLogin.get(
+                        'https://www.infocontrol.tech/web/api/mobile/service/login',
+                        options: Options(
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': basicAuth,
+                          },
+                        ),
+                      );
+
+                      final statusCode = loginResponse.statusCode ?? 0;
+                      if (statusCode == 200 && loginResponse.data['status'] == true) {
+                        final bearer = loginResponse.data['data']['Bearer'] ?? '';
+                        if (bearer.isNotEmpty) {
+                          // Guardar token temporal
+                          setState(() {
+                            currentBearerToken = bearer;
+                            isUsingTempToken = true;
+                          });
+                          // Iniciar timer para volver a usar token de hive despues de 290 segundos
+                          tempTokenTimer?.cancel();
+                          tempTokenTimer = Timer(Duration(seconds: 290), () {
+                            if (mounted) {
+                              setState(() {
+                                currentBearerToken = hiveBearerToken;
+                                isUsingTempToken = false;
+                              });
+                            }
+                          });
+                          Navigator.of(ctx).pop();
+                        } else {
+                          setState(() {
+                            isLoadingLogin = false;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('No se obtuvo Bearer token')),
+                          );
+                        }
+                      } else {
+                        setState(() {
+                          isLoadingLogin = false;
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error al iniciar sesión: ${loginResponse.data['message'] ?? 'Desconocido'}')),
+                        );
+                      }
+                    } catch (e) {
+                      setState(() {
+                        isLoadingLogin = false;
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error al iniciar sesión: $e')),
+                      );
+                    }
+                  },
+                  child: const Text('Ingresar'),
+                ),
             ],
           );
+        });
+      },
+    );
+  }
+
+  Future<Response> _makeGetRequest(String url, {Map<String, dynamic>? queryParameters}) async {
+    return await dio.get(
+      Uri.parse(url).replace(queryParameters: queryParameters).toString(),
+      options: Options(
+        headers: {
+          'Authorization': 'Bearer $currentBearerToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-      );
-    } catch (e) {
-      Navigator.pop(context);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Error inesperado'),
-            content: Text('Ocurrió un error: $e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
+      ),
+    );
+  }
+
+  Future<Response> _makePostRequest(String url, Map<String, dynamic> data) async {
+    return await dio.post(
+      url,
+      data: jsonEncode(data),
+      options: Options(
+        headers: {
+          'Authorization': 'Bearer $currentBearerToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-      );
-    }
+      ),
+    );
   }
 
   @override
@@ -1251,7 +1310,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
     List<String> contractorItems = _getContractorsForDropdown();
 
-    // Determinar estado del contratista por el campo 'estado':
     bool isContratistaHabilitado = false;
     if (selectedContractorEstado != null) {
       final estado = selectedContractorEstado!.trim().toLowerCase();
@@ -1810,14 +1868,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                           ),
                                         ),
                                         ElevatedButton(
-                                          onPressed: () => _hacerIngresoEgresoEmpleado(empleado),
+                                          onPressed: () => _showEmpleadoDetailsModal(empleado),
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: const Color(0xFF43b6ed),
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                             minimumSize: const Size(60, 30),
                                           ),
                                           child: const Text(
-                                            'Entra',
+                                            'Consultar',
                                             style: TextStyle(color: Colors.white, fontSize: 12),
                                           ),
                                         ),
