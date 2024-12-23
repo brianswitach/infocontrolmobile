@@ -73,7 +73,7 @@ class HiveHelper {
     await box.delete(empresaId);
   }
 
-  // Empleados
+  // Empleados (guarda la lista general para la empresa)
   static Future<void> insertEmpleados(String empresaId, List<dynamic> empleados) async {
     final box = Hive.box(empleadosBoxName);
     await box.put(empresaId, empleados);
@@ -89,6 +89,23 @@ class HiveHelper {
   static Future<void> deleteEmpleados(String empresaId) async {
     final box = Hive.box(empleadosBoxName);
     await box.delete(empresaId);
+  }
+
+  // Empleados de un contratista específico en una empresa
+  // Se usa una clave compuesta: "empresaId + '_' + contractorLower"
+  static Future<void> insertContratistaEmpleados(
+      String empresaId, String contractorLower, List<dynamic> empleados) async {
+    final box = Hive.box(empleadosBoxName);
+    final key = '${empresaId}_$contractorLower';
+    await box.put(key, empleados);
+  }
+
+  static List<dynamic> getContratistaEmpleados(String empresaId, String contractorLower) {
+    final box = Hive.box(empleadosBoxName);
+    final key = '${empresaId}_$contractorLower';
+    return List<dynamic>.from(
+      box.get(key, defaultValue: []),
+    );
   }
 
   // id_usuarios

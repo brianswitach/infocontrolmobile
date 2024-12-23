@@ -712,6 +712,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
+  /// IMPORTANTE:
+  /// Si hay conexión, hacemos la solicitud y guardamos la lista en Hive,
+  /// usando como key "empresaId + contractorLower".
+  /// Si NO hay conexión, se muestra la lista que tenemos guardada en Hive (si existe).
   Future<void> _fetchEmpleadosAPI() async {
     if (selectedContractor == null || selectedContractor!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -723,7 +727,36 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    // Mostrar "Cargando..."
+    final contractorLower = selectedContractor!.trim().toLowerCase();
+
+    // Primero revisamos la conectividad
+    final connectivityResult = await connectivity.checkConnectivity();
+
+    // Si NO hay conexión, buscamos en Hive directamente
+    if (connectivityResult == ConnectivityResult.none) {
+      // Obtenemos la lista local de ESTE contratista
+      List<dynamic> localEmpleados = HiveHelper.getContratistaEmpleados(widget.empresaId, contractorLower);
+
+      if (localEmpleados.isNotEmpty) {
+        setState(() {
+          allFetchedEmpleados = localEmpleados;
+          empleados = localEmpleados;
+          filteredEmpleados = localEmpleados;
+          showEmployees = true;
+        });
+      } else {
+        // Si no hay datos locales, avisamos que no está disponible offline
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay datos locales de este contratista.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Si SÍ hay conexión, mostramos el diálogo de "Cargando"
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -763,17 +796,21 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
       Navigator.pop(context);
       final statusCode = response.statusCode ?? 0;
+
       if (statusCode == 200) {
         final responseData = response.data;
         List<dynamic> empleadosData = responseData['data'] ?? [];
-        await HiveHelper.insertEmpleados(widget.empresaId, empleadosData);
 
+        // FILTRAMOS los empleados que corresponden a ESTE contratista
         List<dynamic> filtrados = empleadosData
-            .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == selectedContractor?.toLowerCase()))
+            .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower))
             .toList();
 
+        // Guardamos la lista de ESTE contratista en Hive
+        await HiveHelper.insertContratistaEmpleados(widget.empresaId, contractorLower, filtrados);
+
         setState(() {
-          allFetchedEmpleados = empleadosData;
+          allFetchedEmpleados = filtrados;
           empleados = filtrados;
           filteredEmpleados = filtrados;
           showEmployees = true;
@@ -839,6 +876,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
+  /// Método original para obtener la lista general de empleados (proveedores)
   Future<void> obtenerEmpleados() async {
     var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
