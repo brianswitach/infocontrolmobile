@@ -11,7 +11,7 @@ import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
-  final String bearerToken;       // token que llega desde EmpresaScreen, pero NO se usará en requests
+  final String bearerToken; // token que llega desde EmpresaScreen, pero NO se usará en requests
   final String idEmpresaAsociada;
   final String empresaId;
   final bool openScannerOnInit;
@@ -34,9 +34,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractorCuit;
   String? selectedContractorTipo;
   String? selectedContractorMensajeGeneral;
-  String? selectedContractorEstado; 
+  String? selectedContractorEstado;
   bool showContractorInfo = false;
-  bool showEmployees = false; 
+  bool showEmployees = false;
   List<dynamic> empleados = [];
   List<dynamic> filteredEmpleados = [];
   List<dynamic> allEmpleados = [];
@@ -48,8 +48,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   final TextEditingController dominioController = TextEditingController();
   final TextEditingController searchController = TextEditingController();
 
-  bool qrScanned = false; 
-  bool? resultadoHabilitacion; 
+  bool qrScanned = false;
+  bool? resultadoHabilitacion;
 
   late Dio dio;
   late CookieJar cookieJar;
@@ -122,6 +122,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       final contractorLower = nombreRazonSocial.trim().toLowerCase();
       selectedContractor = nombreRazonSocial.trim();
 
+      // IMPORTANTE: Limpiamos la lista anterior de empleados y forzamos a que
+      // el usuario deba volver a presionar el botón Empleados.
+      showEmployees = false;
+      allFetchedEmpleados.clear();
+      empleados.clear();
+      filteredEmpleados.clear();
+
       var empleadoSeleccionado = allEmpleados.firstWhere(
         (empleado) => (empleado['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower),
         orElse: () => null,
@@ -132,15 +139,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       selectedContractorEstado = empleadoSeleccionado != null ? empleadoSeleccionado['estado'] : '';
 
       showContractorInfo = true;
-
-      if (showEmployees && allFetchedEmpleados.isNotEmpty) {
-        List<dynamic> filtrados = allFetchedEmpleados
-            .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower))
-            .toList();
-
-        empleados = filtrados;
-        filteredEmpleados = filtrados;
-      }
     });
   }
 
@@ -391,7 +389,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        // Si el token no es válido, mostramos un SnackBar
+        // Si el token no es válido, mostramos un SnackBar para indicarle al usuario
+        // que vaya a HomeScreen, el cual maneja la lógica de refresco de token.
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Token inválido. Vuelva a HomeScreen para recargar.')),
         );
@@ -672,6 +671,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
+        // Manejo de 401 - Avisamos al usuario
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Token inválido en GET. Vuelva a HomeScreen para recargar.')),
         );
@@ -1063,9 +1063,34 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     return sorted;
   }
 
-  void _showEmpleadoDetailsModal(dynamic empleado) {
+  /// NUEVA FUNCIÓN para pedir la acción (ingreso/egreso) al endpoint action_resource
+  Future<String> _fetchActionResource(String idEntidad) async {
+    try {
+      final postData = {"id_entidad": idEntidad};
+      final response = await _makePostRequest(
+        "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
+        postData,
+      );
+
+      if ((response.statusCode ?? 0) == 200) {
+        final respData = response.data ?? {};
+        final data = respData['data'] ?? {};
+        final message = data['message'] ?? '';
+        return message;
+      } else {
+        return '';
+      }
+    } catch (e) {
+      // Manejo de error, si deseas puedes retornar algo por defecto
+      return '';
+    }
+  }
+
+  // AHORA MARCAMOS _showEmpleadoDetailsModal COMO ASYNC PARA AÑADIR LA LLAMADA A _fetchActionResource
+  Future<void> _showEmpleadoDetailsModal(dynamic empleado) async {
     final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isHabilitado = estado == 'habilitado';
+    final bool contractorIsHabilitado = selectedContractorEstado?.trim().toLowerCase() == 'habilitado';
 
     final datosString = empleado['datos']?.toString() ?? '';
     String apellidoVal = '';
@@ -1100,7 +1125,25 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     final contratistaSeleccionado = selectedContractor ?? 'No disponible';
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
+
+    // Esto era el texto original para ingreso/egreso, lo mantendremos por defecto
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
+
+    // SOLO si el empleado y contratista están habilitados, pedimos la acción al nuevo endpoint
+    if (isHabilitado && contractorIsHabilitado) {
+      final actionMessage = await _fetchActionResource(idEntidad);
+      if (actionMessage == "REGISTRAR INGRESO") {
+        buttonText = "Registrar Ingreso";
+      } else if (actionMessage == "REGISTRAR EGRESO") {
+        buttonText = "Registrar Egreso";
+      }
+    }
+
+    // NUEVO: si el contratista está INHABILITADO, aunque el empleado esté habilitado, no se debe mostrar botón.
+    bool showActionButton = false; 
+    if (isHabilitado && contractorIsHabilitado) {
+      showActionButton = true;
+    }
 
     showDialog(
       context: context,
@@ -1167,7 +1210,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cerrar', style: TextStyle(fontFamily: 'Montserrat')),
             ),
-            if (isHabilitado)
+            // Ahora mostramos el botón de acción (ingresar/egresar) 
+            // solo si el empleado está habilitado y el contratista también
+            if (showActionButton)
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();
@@ -1381,7 +1426,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             'Número de Identificación Personal',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
-                              fontSize:16,
+                              fontSize: 16,
                               color: Colors.black,
                             ),
                           ),
@@ -1433,7 +1478,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             'Dominio/Placa/N° de Serie/N° de Chasis',
                             style: TextStyle(
                               fontFamily: 'Montserrat',
-                              fontSize:16,
+                              fontSize: 16,
                               color: Colors.black,
                             ),
                           ),
