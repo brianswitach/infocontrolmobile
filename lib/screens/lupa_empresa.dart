@@ -14,8 +14,8 @@ class LupaEmpresaScreen extends StatefulWidget {
   final String bearerToken; // token que llega desde HomeScreen
   final String idEmpresaAsociada;
   final String empresaId;
-  final String username; // nuevo: para refrescar token en LupaEmpresa
-  final String password; // nuevo: para refrescar token en LupaEmpresa
+  final String username; // para refrescar token en LupaEmpresa
+  final String password; // para refrescar token en LupaEmpresa
   final bool openScannerOnInit;
 
   const LupaEmpresaScreen({
@@ -41,10 +41,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   String? selectedContractorEstado;
   bool showContractorInfo = false;
   bool showEmployees = false;
+
+  // Lista general de empleados que obtenemos de "listartest" (UNA SOLA VEZ al abrir la pantalla).
+  List<dynamic> allEmpleadosListarTest = [];
+
+  // Lista que se mostrará al filtrar por contratista
   List<dynamic> empleados = [];
   List<dynamic> filteredEmpleados = [];
-  List<dynamic> allEmpleados = [];
-  List<dynamic> allFetchedEmpleados = [];
+
   bool isLoading = true;
 
   final MobileScannerController controladorCamara = MobileScannerController();
@@ -94,9 +98,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     // Iniciamos un timer local para refrescar el token desde LupaEmpresa
     _startTokenRefreshTimerLupa();
 
+    // Escuchamos cambios en el campo de búsqueda
     searchController.addListener(_filterEmployees);
 
-    obtenerEmpleados().then((_) {
+    // 1) AL ABRIR LA PANTALLA: Traemos TODOS los empleados con 'listartest' UNA SOLA VEZ
+    //    y los almacenamos en allEmpleadosListarTest.
+    _fetchAllEmployeesListarTest().then((_) {
       if (widget.openScannerOnInit) {
         _mostrarEscanerQR();
       }
@@ -110,8 +117,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     dominioController.dispose();
     searchController.dispose();
     connectivitySubscription.cancel();
+
     // Cancelamos también el timer local
     _refreshTimerLupa?.cancel();
+
     super.dispose();
   }
 
@@ -119,7 +128,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   void _startTokenRefreshTimerLupa() {
     _refreshTimerLupa?.cancel();
     _refreshTimerLupa = Timer.periodic(
-      Duration(minutes: 4, seconds: 10),
+      const Duration(minutes: 4, seconds: 10),
       (_) => _refreshBearerTokenLupa(),
     );
   }
@@ -168,50 +177,140 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
-  void _mostrarProximamente() {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Próximamente', style: TextStyle(fontFamily: 'Montserrat')),
-          content: const Text('Esta funcionalidad estará disponible próximamente.', style: TextStyle(fontFamily: 'Montserrat')),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('OK', style: TextStyle(fontFamily: 'Montserrat')),
-            ),
-          ],
+  // *******************
+  // NUEVO MÉTODO:
+  // *******************
+  // Carga todos los empleados de "listartest" UNA SOLA VEZ y los guarda en allEmpleadosListarTest.
+  // Después, cuando seleccionemos Contratista + Empleados, filtramos localmente.
+  Future<void> _fetchAllEmployeesListarTest() async {
+    setState(() {
+      isLoading = true;
+    });
+
+    final connectivityResult = await connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // Modo offline:
+      // Reutilizamos las funciones existentes de HiveHelper para "empleados"
+      // y guardamos la lista general en la misma caja "empleados".
+      // Por eso usaremos getEmpleados(widget.empresaId) como backup.
+      List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
+      if (empleadosLocales.isNotEmpty) {
+        allEmpleadosListarTest = empleadosLocales;
+        setState(() {
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          isLoading = false;
+        });
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay datos locales de empleados (listartest).'),
+            backgroundColor: Colors.red,
+          ),
         );
-      },
-    );
+      }
+      return;
+    }
+
+    // Si hay conexión, hacemos la solicitud
+    try {
+      final response = await _makeGetRequest(
+        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+        queryParameters: {'id_empresas': widget.empresaId},
+      );
+      final statusCode = response.statusCode ?? 0;
+
+      if (statusCode == 200) {
+        final responseData = response.data;
+        List<dynamic> employeesData = responseData['data'] ?? [];
+
+        // Guardamos en "allEmpleadosListarTest"
+        allEmpleadosListarTest = employeesData;
+
+        // Guardamos offline en Hive (reutilizamos insertEmpleados)
+        HiveHelper.insertEmpleados(widget.empresaId, employeesData);
+
+        setState(() {
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          isLoading = false;
+        });
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al obtener empleados listartest: $statusCode'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } on DioException catch (e) {
+      setState(() {
+        isLoading = false;
+      });
+      if (!mounted) return;
+      if (e.response?.statusCode == 401) {
+        // Token inválido
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Token inválido al obtener listartest. Vuelva a HomeScreen para recargar.'),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error en la solicitud: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error inesperado en la solicitud: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  void updateSelectedContractor(String nombreRazonSocial) {
-    setState(() {
-      final contractorLower = nombreRazonSocial.trim().toLowerCase();
-      selectedContractor = nombreRazonSocial.trim();
-
-      // Limpiamos la lista anterior de empleados y forzamos a que
-      // el usuario deba volver a presionar el botón Empleados.
-      showEmployees = false;
-      allFetchedEmpleados.clear();
-      empleados.clear();
-      filteredEmpleados.clear();
-
-      var empleadoSeleccionado = allEmpleados.firstWhere(
-        (empleado) => (empleado['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower),
-        orElse: () => null,
+  // Este método se llama al hacer clic en "Empleados" (con un contratista seleccionado).
+  // AHORA ya NO hace ninguna solicitud extra, sino que filtra localmente "allEmpleadosListarTest".
+  Future<void> _filtrarEmpleadosDeContratista() async {
+    if (selectedContractor == null || selectedContractor!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Debes elegir un contratista'),
+          backgroundColor: Colors.red,
+        ),
       );
-      selectedContractorCuit = empleadoSeleccionado != null ? empleadoSeleccionado['cuit'] : '';
-      selectedContractorTipo = empleadoSeleccionado != null ? empleadoSeleccionado['tipo'] : '';
-      selectedContractorMensajeGeneral = empleadoSeleccionado != null ? empleadoSeleccionado['mensaje_general'] : '';
-      selectedContractorEstado = empleadoSeleccionado != null ? empleadoSeleccionado['estado'] : '';
+      return;
+    }
 
-      showContractorInfo = true;
+    final contractorLower = selectedContractor!.trim().toLowerCase();
+
+    // Filtramos localmente
+    List<dynamic> filtrados = allEmpleadosListarTest.where((emp) {
+      final nombreRazonSocial = emp['nombre_razon_social']?.toString().trim().toLowerCase() ?? '';
+      return nombreRazonSocial == contractorLower;
+    }).toList();
+
+    // Asignamos a empleados y filteredEmpleados
+    setState(() {
+      empleados = filtrados;
+      filteredEmpleados = filtrados;
+      showEmployees = true;
     });
   }
 
+  // LOGICA DE PROCESOS OFFLINE
   Future<void> _saveOfflineRequest(String dniIngresado) async {
     final Map<String, dynamic> pendingData = {
       "dni": dniIngresado,
@@ -272,7 +371,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           }
         }
       } catch (e) {
-        // Error procesando pendiente offline, continuamos
+        // Error procesando pendiente offline, continuamos con la siguiente
       }
     }
   }
@@ -349,6 +448,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
+      // offline
       await _saveOfflineRequest(texto);
       if (!mounted) return;
       showDialog(
@@ -589,6 +689,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
+        // Token inválido en POST
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Token inválido en POST. Vuelva a HomeScreen para recargar.')),
         );
@@ -778,243 +879,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
-  /// Buscar la lista de empleados de un contratista específico
-  Future<void> _fetchEmpleadosAPI() async {
-    if (selectedContractor == null || selectedContractor!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Debes elegir un contratista'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    final contractorLower = selectedContractor!.trim().toLowerCase();
-
-    final connectivityResult = await connectivity.checkConnectivity();
-    if (connectivityResult == ConnectivityResult.none) {
-      // offline
-      List<dynamic> localEmpleados = HiveHelper.getContratistaEmpleados(widget.empresaId, contractorLower);
-      if (localEmpleados.isNotEmpty) {
-        setState(() {
-          allFetchedEmpleados = localEmpleados;
-          empleados = localEmpleados;
-          filteredEmpleados = localEmpleados;
-          showEmployees = true;
-        });
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No hay datos locales de este contratista.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
-
-    // Si hay conexión, mostramos "Cargando..."
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => Center(
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text(
-                'Cargando...',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  color: Colors.black,
-                  decoration: TextDecoration.none,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    try {
-      final response = await _makeGetRequest(
-        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-        queryParameters: {'id_empresas': widget.empresaId},
-      );
-
-      Navigator.pop(context);
-      final statusCode = response.statusCode ?? 0;
-
-      if (statusCode == 200) {
-        final responseData = response.data;
-        List<dynamic> empleadosData = responseData['data'] ?? [];
-
-        // filtramos el contratista
-        List<dynamic> filtrados = empleadosData
-            .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower))
-            .toList();
-
-        // Guardamos en Hive
-        await HiveHelper.insertContratistaEmpleados(widget.empresaId, contractorLower, filtrados);
-
-        setState(() {
-          allFetchedEmpleados = filtrados;
-          empleados = filtrados;
-          filteredEmpleados = filtrados;
-          showEmployees = true;
-        });
-      } else {
-        showDialog(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              title: const Text('Código de respuesta'),
-              content: Text('El código de respuesta es: $statusCode'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('OK'),
-                ),
-              ],
-            );
-          },
-        );
-      }
-    } on DioException catch (e) {
-      Navigator.pop(context);
-      if (e.response?.statusCode == 401) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Token inválido en Empleados. Vuelva a HomeScreen para recargar.')),
-        );
-      } else {
-        showDialog(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              title: const Text('Error'),
-              content: Text('Error en la solicitud: $e'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('OK'),
-                ),
-              ],
-            );
-          },
-        );
-      }
-    } catch (e) {
-      Navigator.pop(context);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Error inesperado'),
-            content: Text('Ocurrió un error: $e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-    }
-  }
-
-  /// Obtiene la lista general de empleados/ proveedores (para dropdown de contratistas)
-  Future<void> obtenerEmpleados() async {
-    var connectivityResult = await connectivity.checkConnectivity();
-    if (connectivityResult == ConnectivityResult.none) {
-      List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
-      if (empleadosLocales.isNotEmpty) {
-        allEmpleados = empleadosLocales;
-        setState(() {
-          isLoading = false;
-        });
-      } else {
-        setState(() {
-          isLoading = false;
-        });
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No hay datos locales disponibles para empleados.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } else {
-      try {
-        final response = await _makeGetRequest(
-          'https://www.infocontrol.tech/web/api/mobile/proveedores/listar',
-          queryParameters: {
-            'id_empresas': widget.idEmpresaAsociada,
-          },
-        );
-
-        if (response.statusCode == 200) {
-          final responseData = response.data;
-          allEmpleados = responseData['data'] ?? [];
-          await HiveHelper.insertEmpleados(widget.empresaId, allEmpleados);
-          setState(() {
-            isLoading = false;
-          });
-        } else {
-          setState(() {
-            isLoading = false;
-          });
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error al obtener empleados: ${response.statusCode}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } on DioException catch (e) {
-        setState(() {
-          isLoading = false;
-        });
-        if (!mounted) return;
-        if (e.response?.statusCode == 401) {
-          // Token inválido
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Token inválido en ObtenerEmpleados. Vuelva a HomeScreen para recargar.')),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error en la solicitud: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } catch (e) {
-        setState(() {
-          isLoading = false;
-        });
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error en la solicitud: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
+  // Filtramos por DNI en la lista "empleados" (la que se obtiene al pulsar "Empleados" tras elegir contratista)
   void _filterEmployees() {
     String query = searchController.text.toLowerCase().trim();
     if (query.isEmpty) {
@@ -1023,10 +888,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       });
     } else {
       List<dynamic> temp = [];
-      for (var empleado in empleados) {
-        final dniVal = (empleado['valor']?.toString().trim() ?? '').toLowerCase();
+      for (var emp in empleados) {
+        final dniVal = (emp['valor']?.toString().trim() ?? '').toLowerCase();
         if (dniVal.startsWith(query)) {
-          temp.add(empleado);
+          temp.add(emp);
         }
       }
       setState(() {
@@ -1106,8 +971,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   List<String> _getContractorsForDropdown() {
+    // A partir de la lista general (allEmpleadosListarTest), extraemos
+    // todos los "nombre_razon_social" únicos, para el Dropdown
     Set<String> contractors = {};
-    for (var emp in allEmpleados) {
+    for (var emp in allEmpleadosListarTest) {
       final nombre = emp['nombre_razon_social']?.toString().trim() ?? '';
       if (nombre.isNotEmpty) {
         contractors.add(nombre);
@@ -1118,6 +985,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     return sorted;
   }
 
+  // Para action_resource (ingreso/egreso)
   Future<String> _fetchActionResource(String idEntidad) async {
     try {
       final postData = {"id_entidad": idEntidad};
@@ -1301,10 +1169,30 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
   }
 
+  void _mostrarProximamente() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Próximamente', style: TextStyle(fontFamily: 'Montserrat')),
+          content: const Text('Esta funcionalidad estará disponible próximamente.', style: TextStyle(fontFamily: 'Montserrat')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('OK', style: TextStyle(fontFamily: 'Montserrat')),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     String botonQrText = qrScanned ? "Ingresar con otro QR" : "Ingreso con QR";
 
+    // Contratistas para el Dropdown, a partir de la lista general (allEmpleadosListarTest)
     List<String> contractorItems = _getContractorsForDropdown();
 
     bool isContratistaHabilitado = false;
@@ -1359,6 +1247,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
+                    // CABECERA
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -1401,6 +1290,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                       ),
                     ),
                     const SizedBox(height: 30),
+
+                    // FILTROS
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -1423,6 +1314,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                           const SizedBox(height: 8),
                           Divider(color: Colors.grey[300], thickness: 1),
                           const SizedBox(height: 20),
+
+                          // Dropdown Contratista
                           const Text(
                             'Contratista',
                             style: TextStyle(
@@ -1448,7 +1341,32 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             value: selectedContractor,
                             onChanged: (value) {
                               if (value != null) {
-                                updateSelectedContractor(value);
+                                setState(() {
+                                  selectedContractor = value;
+                                  showContractorInfo = false;
+                                  showEmployees = false;
+                                  selectedContractorEstado = null;
+                                  empleados.clear();
+                                  filteredEmpleados.clear();
+                                });
+
+                                // Actualizamos info extra (cuit, estado, etc.)
+                                // Buscamos un "ejemplo" de este contratista en allEmpleadosListarTest
+                                final contractorLower = value.trim().toLowerCase();
+                                var firstMatch = allEmpleadosListarTest.firstWhere(
+                                  (emp) =>
+                                      (emp['nombre_razon_social']?.toString().trim().toLowerCase() ==
+                                       contractorLower),
+                                  orElse: () => null,
+                                );
+
+                                if (firstMatch != null) {
+                                  selectedContractorCuit = firstMatch['cuit'] ?? '';
+                                  selectedContractorTipo = firstMatch['tipo'] ?? '';
+                                  selectedContractorMensajeGeneral = firstMatch['mensaje_general'] ?? '';
+                                  selectedContractorEstado = firstMatch['estado'] ?? '';
+                                  showContractorInfo = true;
+                                }
                               }
                             },
                             decoration: InputDecoration(
@@ -1467,6 +1385,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ),
                           ),
                           const SizedBox(height: 20),
+
+                          // Nro. de Identificación
                           const Text(
                             'Número de Identificación Personal',
                             style: TextStyle(
@@ -1519,6 +1439,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ],
                           ),
                           const SizedBox(height: 20),
+
+                          // Dominio
                           const Text(
                             'Dominio/Placa/N° de Serie/N° de Chasis',
                             style: TextStyle(
@@ -1571,6 +1493,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ],
                           ),
                           const SizedBox(height: 16),
+
                           if (resultadoHabilitacion != null) ...[
                             const SizedBox(height: 16),
                             Container(
@@ -1618,6 +1541,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ],
                           ],
                           const SizedBox(height: 16),
+
+                          // Botón Ingreso con QR
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
@@ -1653,6 +1578,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               ),
                             ),
                           ),
+
+                          // INFORMACIÓN DEL CONTRATISTA
                           if (showContractorInfo) ...[
                             const SizedBox(height: 30),
                             Container(
@@ -1714,11 +1641,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ),
                           ],
                           const SizedBox(height: 30),
+
+                          // BOTONES DE EMPLEADOS Y VEHICULOS
                           Row(
                             children: [
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: _fetchEmpleadosAPI,
+                                  onPressed: _filtrarEmpleadosDeContratista, 
+                                  // Ahora solo filtra localmente "allEmpleadosListarTest"
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[200],
                                     padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1760,6 +1690,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             ],
                           ),
                           const SizedBox(height: 20),
+
+                          // BOTÓN IMPRIMIR
                           Center(
                             child: ElevatedButton(
                               onPressed: _mostrarProximamente,
@@ -1780,6 +1712,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                               ),
                             ),
                           ),
+
+                          // LISTA DE EMPLEADOS (cuando showEmployees = true)
                           if (showEmployees) ...[
                             const SizedBox(height: 30),
                             TextField(
@@ -1898,6 +1832,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                       ),
                     ),
                     const SizedBox(height: 30),
+
+                    // LOGO
                     Center(
                       child: Image.asset(
                         'assets/infocontrol_logo.png',
