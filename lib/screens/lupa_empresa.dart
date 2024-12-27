@@ -33,7 +33,7 @@ class LupaEmpresaScreen extends StatefulWidget {
   _LupaEmpresaScreenState createState() => _LupaEmpresaScreenState();
 }
 
-class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
+class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindingObserver {
   String? selectedContractor;
   String? selectedContractorCuit;
   String? selectedContractorTipo;
@@ -42,7 +42,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   bool showContractorInfo = false;
   bool showEmployees = false;
 
-  // Lista general de empleados que obtenemos de "listartest" (UNA SOLA VEZ al abrir la pantalla).
+  // Lista general de empleados que obtenemos de "listartest" (UNA SOLA VEZ al abrir la pantalla o al reanudar).
   List<dynamic> allEmpleadosListarTest = [];
 
   // Lista que se mostrará al filtrar por contratista
@@ -79,6 +79,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   void initState() {
     super.initState();
 
+    // -------- OBSERVADOR DEL CICLO DE VIDA (para detectar cuando se bloquea/desbloquea el dispositivo) --------
+    WidgetsBinding.instance.addObserver(this);
+
     // Asignamos el token que llega como parámetro
     bearerToken = widget.bearerToken;
 
@@ -98,16 +101,36 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     // Iniciamos un timer local para refrescar el token desde LupaEmpresa
     _startTokenRefreshTimerLupa();
 
-    // Escuchamos cambios en el campo de búsqueda
+    // Escuchamos cambios en el campo de búsqueda (para filtrar empleados)
     searchController.addListener(_filterEmployees);
 
-    // 1) AL ABRIR LA PANTALLA: Traemos TODOS los empleados con 'listartest' UNA SOLA VEZ
-    //    y los almacenamos en allEmpleadosListarTest.
+    // 1) AL ABRIR LA PANTALLA: Traemos TODOS los empleados con 'listartest' (si hay conexión)
+    //    y los almacenamos en allEmpleadosListarTest. Si NO hay conexión, se usan los datos locales.
     _fetchAllEmployeesListarTest().then((_) {
       if (widget.openScannerOnInit) {
         _mostrarEscanerQR();
       }
     });
+  }
+
+  // -------- DETECTAR CUANDO LA APP SE REANUDA (RESUMED), p.ej. tras desbloquear el dispositivo --------
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    // Cuando el usuario vuelve a la app (ej: desbloquear el dispositivo):
+    if (state == AppLifecycleState.resumed) {
+      // Mostramos "Cargando..." nuevamente y volvemos a hacer la misma lógica,
+      // pero SOLO si hay conexión. Si NO hay conexión, solo usamos datos locales.
+      setState(() {
+        isLoading = true;
+      });
+      _fetchAllEmployeesListarTest().then((_) {
+        setState(() {
+          isLoading = false;
+        });
+      });
+    }
   }
 
   @override
@@ -117,6 +140,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     dominioController.dispose();
     searchController.dispose();
     connectivitySubscription.cancel();
+
+    // Quitamos el observador del ciclo de vida
+    WidgetsBinding.instance.removeObserver(this);
 
     // Cancelamos también el timer local
     _refreshTimerLupa?.cancel();
@@ -177,40 +203,33 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
-  // *******************
-  // NUEVO MÉTODO:
-  // *******************
-  // Carga todos los empleados de "listartest" UNA SOLA VEZ y los guarda en allEmpleadosListarTest.
-  // Después, cuando seleccionemos Contratista + Empleados, filtramos localmente.
+  // Carga todos los empleados de "listartest" (si hay conexión) y los guarda en allEmpleadosListarTest.
+  // Si NO hay conexión, solo usa lo que esté guardado localmente (Hive).
   Future<void> _fetchAllEmployeesListarTest() async {
     setState(() {
       isLoading = true;
     });
 
     final connectivityResult = await connectivity.checkConnectivity();
+
     if (connectivityResult == ConnectivityResult.none) {
       // Modo offline:
-      // Reutilizamos las funciones existentes de HiveHelper para "empleados"
-      // y guardamos la lista general en la misma caja "empleados".
-      // Por eso usaremos getEmpleados(widget.empresaId) como backup.
       List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales.isNotEmpty) {
         allEmpleadosListarTest = empleadosLocales;
-        setState(() {
-          isLoading = false;
-        });
       } else {
-        setState(() {
-          isLoading = false;
-        });
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No hay datos locales de empleados (listartest).'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No hay datos locales de empleados (listartest).'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
+      setState(() {
+        isLoading = false;
+      });
       return;
     }
 
@@ -321,6 +340,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     HiveHelper.savePendingDNIRequest(pendingData);
   }
 
+  // Cuando detectamos que hay conexión nuevamente, procesamos los requests pendientes.
   Future<void> _processPendingRequests() async {
     final List<Map<String, dynamic>> pendingRequests = HiveHelper.getAllPendingDNIRequests();
     if (pendingRequests.isEmpty) return;
@@ -410,6 +430,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
+      // Sin conexión, lo guardamos en pendientes
       await _saveOfflineRequest(dniVal);
       showDialog(
         context: context,
@@ -761,6 +782,27 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
+    // Verificamos conexión. Si no hay, NO hacemos la solicitud.
+    final connectivityResult = await connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Modo offline'),
+            content: const Text('No hay conexión para solicitar datos del dominio.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
     // Mostrar "Cargando..."
     showDialog(
       context: context,
@@ -793,27 +835,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
 
     try {
-      final connectivityResult = await connectivity.checkConnectivity();
-      if (connectivityResult == ConnectivityResult.none) {
-        Navigator.pop(context);
-        showDialog(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              title: const Text('Modo offline'),
-              content: const Text('No hay conexión para solicitar datos del dominio.'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('OK'),
-                ),
-              ],
-            );
-          },
-        );
-        return;
-      }
-
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
         queryParameters: {'id_empresas': widget.empresaId},
@@ -1351,7 +1372,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                                 });
 
                                 // Actualizamos info extra (cuit, estado, etc.)
-                                // Buscamos un "ejemplo" de este contratista en allEmpleadosListarTest
                                 final contractorLower = value.trim().toLowerCase();
                                 var firstMatch = allEmpleadosListarTest.firstWhere(
                                   (emp) =>
@@ -1647,8 +1667,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
                             children: [
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: _filtrarEmpleadosDeContratista, 
-                                  // Ahora solo filtra localmente "allEmpleadosListarTest"
+                                  onPressed: _filtrarEmpleadosDeContratista,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[200],
                                     padding: const EdgeInsets.symmetric(vertical: 12),
