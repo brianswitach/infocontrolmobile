@@ -1,4 +1,4 @@
-import 'dart:async'; // <-- IMPORTANTE para StreamSubscription
+import 'dart:async'; // <-- IMPORTANTE para Timer y StreamSubscription
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -11,9 +11,11 @@ import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
-  final String bearerToken; // token que llega desde EmpresaScreen, pero NO se usará en requests
+  final String bearerToken; // token que llega desde HomeScreen
   final String idEmpresaAsociada;
   final String empresaId;
+  final String username; // nuevo: para refrescar token en LupaEmpresa
+  final String password; // nuevo: para refrescar token en LupaEmpresa
   final bool openScannerOnInit;
 
   const LupaEmpresaScreen({
@@ -22,6 +24,8 @@ class LupaEmpresaScreen extends StatefulWidget {
     required this.bearerToken,
     required this.idEmpresaAsociada,
     required this.empresaId,
+    required this.username,
+    required this.password,
     this.openScannerOnInit = false,
   }) : super(key: key);
 
@@ -61,9 +65,18 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   // Mapa para almacenar si un empleado está actualmente dentro (true) o fuera (false).
   Map<String, bool> employeeInsideStatus = {};
 
+  // El token actual (viene desde HomeScreen) pero se puede refrescar aquí
+  late String bearerToken;
+
+  // Timer para refrescar token en LupaEmpresa
+  Timer? _refreshTimerLupa;
+
   @override
   void initState() {
     super.initState();
+
+    // Asignamos el token que llega como parámetro
+    bearerToken = widget.bearerToken;
 
     cookieJar = CookieJar();
     dio = Dio();
@@ -78,7 +91,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
     hiveIdUsuarios = HiveHelper.getIdUsuarios();
 
-    // NO guardamos token en variable. Se obtendrá directamente de Hive en cada request
+    // Iniciamos un timer local para refrescar el token desde LupaEmpresa
+    _startTokenRefreshTimerLupa();
+
     searchController.addListener(_filterEmployees);
 
     obtenerEmpleados().then((_) {
@@ -95,7 +110,62 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     dominioController.dispose();
     searchController.dispose();
     connectivitySubscription.cancel();
+    // Cancelamos también el timer local
+    _refreshTimerLupa?.cancel();
     super.dispose();
+  }
+
+  // Inicia el Timer local para refrescar el token cada 4min 10s
+  void _startTokenRefreshTimerLupa() {
+    _refreshTimerLupa?.cancel();
+    _refreshTimerLupa = Timer.periodic(
+      Duration(minutes: 4, seconds: 10),
+      (_) => _refreshBearerTokenLupa(),
+    );
+  }
+
+  // Refresca el token usando username y password, en LupaEmpresa
+  Future<void> _refreshBearerTokenLupa() async {
+    var connectivityResult = await connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      print('No hay conexión. No se puede refrescar el token en LupaEmpresa.');
+      return;
+    }
+
+    try {
+      final response = await dio.post(
+        "https://www.infocontrol.tech/web/api/mobile/service/login",
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
+          },
+        ),
+        data: jsonEncode({
+          'username': widget.username,
+          'password': widget.password,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final loginData = response.data;
+        String newToken = loginData['data']['Bearer'];
+
+        setState(() {
+          bearerToken = newToken; // actualizamos el token local
+        });
+
+        // Guardamos también en Hive, si quieres mantener todo sincronizado:
+        HiveHelper.storeBearerToken(newToken);
+
+        print('Token refrescado correctamente en LupaEmpresa: $newToken');
+      } else {
+        throw Exception('Error al actualizar el token en LupaEmpresa: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error al refrescar el token en LupaEmpresa: $e');
+      // Podrías mostrar un snackbar si prefieres
+    }
   }
 
   void _mostrarProximamente() {
@@ -122,7 +192,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       final contractorLower = nombreRazonSocial.trim().toLowerCase();
       selectedContractor = nombreRazonSocial.trim();
 
-      // IMPORTANTE: Limpiamos la lista anterior de empleados y forzamos a que
+      // Limpiamos la lista anterior de empleados y forzamos a que
       // el usuario deba volver a presionar el botón Empleados.
       showEmployees = false;
       allFetchedEmpleados.clear();
@@ -164,7 +234,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       if (dniIngresado.isEmpty) continue;
 
       try {
-        // Para cada GET, tomamos el token fresco de Hive
+        // Primero hacemos GET para buscar empleado
         final response = await _makeGetRequest(
           "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
           queryParameters: {'id_empresas': idEmpresas},
@@ -182,7 +252,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
             final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
             final String estado = foundEmployee['estado']?.toString().trim() ?? '';
             if (estado.toLowerCase() == 'inhabilitado') {
-              continue;
+              continue; // No se hace nada
             }
 
             final Map<String, dynamic> postData = {
@@ -202,7 +272,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           }
         }
       } catch (e) {
-        // Error procesando pendiente offline
+        // Error procesando pendiente offline, continuamos
       }
     }
   }
@@ -369,7 +439,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           );
         }
       } else {
-        // statusCode != 200
         showDialog(
           context: context,
           builder: (ctx) {
@@ -389,8 +458,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        // Si el token no es válido, mostramos un SnackBar para indicarle al usuario
-        // que vaya a HomeScreen, el cual maneja la lógica de refresco de token.
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Token inválido. Vuelva a HomeScreen para recargar.')),
         );
@@ -522,7 +589,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        // Token inválido
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Token inválido en POST. Vuelva a HomeScreen para recargar.')),
         );
@@ -570,9 +636,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       MaterialPageRoute(
         builder: (context) => LupaEmpresaScreen(
           empresa: widget.empresa,
-          bearerToken: widget.bearerToken, // se pasa el que venía, pero no se usa en requests
+          bearerToken: bearerToken, // token actualizado
           idEmpresaAsociada: widget.idEmpresaAsociada,
           empresaId: widget.empresaId,
+          username: widget.username,
+          password: widget.password,
           openScannerOnInit: true,
         ),
       ),
@@ -645,7 +713,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         return;
       }
 
-      // Token fresco de Hive
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
         queryParameters: {'id_empresas': widget.empresaId},
@@ -671,7 +738,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        // Manejo de 401 - Avisamos al usuario
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Token inválido en GET. Vuelva a HomeScreen para recargar.')),
         );
@@ -712,10 +778,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
-  /// IMPORTANTE:
-  /// Si hay conexión, hacemos la solicitud y guardamos la lista en Hive,
-  /// usando como key "empresaId + contractorLower".
-  /// Si NO hay conexión, se muestra la lista que tenemos guardada en Hive (si existe).
+  /// Buscar la lista de empleados de un contratista específico
   Future<void> _fetchEmpleadosAPI() async {
     if (selectedContractor == null || selectedContractor!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -729,14 +792,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
 
     final contractorLower = selectedContractor!.trim().toLowerCase();
 
-    // Primero revisamos la conectividad
     final connectivityResult = await connectivity.checkConnectivity();
-
-    // Si NO hay conexión, buscamos en Hive directamente
     if (connectivityResult == ConnectivityResult.none) {
-      // Obtenemos la lista local de ESTE contratista
+      // offline
       List<dynamic> localEmpleados = HiveHelper.getContratistaEmpleados(widget.empresaId, contractorLower);
-
       if (localEmpleados.isNotEmpty) {
         setState(() {
           allFetchedEmpleados = localEmpleados;
@@ -745,7 +804,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
           showEmployees = true;
         });
       } else {
-        // Si no hay datos locales, avisamos que no está disponible offline
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('No hay datos locales de este contratista.'),
@@ -756,7 +814,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       return;
     }
 
-    // Si SÍ hay conexión, mostramos el diálogo de "Cargando"
+    // Si hay conexión, mostramos "Cargando..."
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -788,7 +846,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
 
     try {
-      // Token fresco de Hive
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
         queryParameters: {'id_empresas': widget.empresaId},
@@ -801,12 +858,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         final responseData = response.data;
         List<dynamic> empleadosData = responseData['data'] ?? [];
 
-        // FILTRAMOS los empleados que corresponden a ESTE contratista
+        // filtramos el contratista
         List<dynamic> filtrados = empleadosData
             .where((emp) => (emp['nombre_razon_social']?.toString().trim().toLowerCase() == contractorLower))
             .toList();
 
-        // Guardamos la lista de ESTE contratista en Hive
+        // Guardamos en Hive
         await HiveHelper.insertContratistaEmpleados(widget.empresaId, contractorLower, filtrados);
 
         setState(() {
@@ -835,7 +892,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        // Token inválido
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Token inválido en Empleados. Vuelva a HomeScreen para recargar.')),
         );
@@ -876,7 +932,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     }
   }
 
-  /// Método original para obtener la lista general de empleados (proveedores)
+  /// Obtiene la lista general de empleados/ proveedores (para dropdown de contratistas)
   Future<void> obtenerEmpleados() async {
     var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -900,7 +956,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     } else {
       try {
-        // Token fresco de Hive
         final response = await _makeGetRequest(
           'https://www.infocontrol.tech/web/api/mobile/proveedores/listar',
           queryParameters: {
@@ -1063,7 +1118,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     return sorted;
   }
 
-  /// NUEVA FUNCIÓN para pedir la acción (ingreso/egreso) al endpoint action_resource
   Future<String> _fetchActionResource(String idEntidad) async {
     try {
       final postData = {"id_entidad": idEntidad};
@@ -1081,12 +1135,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
         return '';
       }
     } catch (e) {
-      // Manejo de error, si deseas puedes retornar algo por defecto
       return '';
     }
   }
 
-  // AHORA MARCAMOS _showEmpleadoDetailsModal COMO ASYNC PARA AÑADIR LA LLAMADA A _fetchActionResource
   Future<void> _showEmpleadoDetailsModal(dynamic empleado) async {
     final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isHabilitado = estado == 'habilitado';
@@ -1126,10 +1178,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
 
-    // Esto era el texto original para ingreso/egreso, lo mantendremos por defecto
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
 
-    // SOLO si el empleado y contratista están habilitados, pedimos la acción al nuevo endpoint
     if (isHabilitado && contractorIsHabilitado) {
       final actionMessage = await _fetchActionResource(idEntidad);
       if (actionMessage == "REGISTRAR INGRESO") {
@@ -1139,8 +1189,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
       }
     }
 
-    // NUEVO: si el contratista está INHABILITADO, aunque el empleado esté habilitado, no se debe mostrar botón.
-    bool showActionButton = false; 
+    bool showActionButton = false;
     if (isHabilitado && contractorIsHabilitado) {
       showActionButton = true;
     }
@@ -1210,8 +1259,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cerrar', style: TextStyle(fontFamily: 'Montserrat')),
             ),
-            // Ahora mostramos el botón de acción (ingresar/egresar) 
-            // solo si el empleado está habilitado y el contratista también
             if (showActionButton)
               TextButton(
                 onPressed: () {
@@ -1226,14 +1273,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
     );
   }
 
-  // Cada GET/POST obtiene el token fresco de Hive
+  // GET/POST con bearerToken actual
   Future<Response> _makeGetRequest(String url, {Map<String, dynamic>? queryParameters}) async {
-    String freshToken = HiveHelper.getBearerToken();
     return await dio.get(
       Uri.parse(url).replace(queryParameters: queryParameters).toString(),
       options: Options(
         headers: {
-          'Authorization': 'Bearer $freshToken',
+          'Authorization': 'Bearer $bearerToken',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
@@ -1242,13 +1288,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> {
   }
 
   Future<Response> _makePostRequest(String url, Map<String, dynamic> data) async {
-    String freshToken = HiveHelper.getBearerToken();
     return await dio.post(
       url,
       data: jsonEncode(data),
       options: Options(
         headers: {
-          'Authorization': 'Bearer $freshToken',
+          'Authorization': 'Bearer $bearerToken',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },

@@ -1,12 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import './empresa_screen.dart';
 import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+
+// Eliminamos import de empresa_screen.dart
+// import './empresa_screen.dart';
+
+// Importamos lupa_empresa.dart para ir directo a LupaEmpresaScreen
+import './lupa_empresa.dart';
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
@@ -58,10 +63,10 @@ class _HomeScreenState extends State<HomeScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
-    // Guardamos el token en Hive
+    // Guardamos el token inicial en Hive (para offline si se requiere)
     HiveHelper.storeBearerToken(bearerToken);
 
-    // Inicia la rutina de refresco cada 290s
+    // Inicia la rutina de refresco cada 4min 10s (250s aprox)
     _startTokenRefreshTimer();
     _setupConnectivityListener();
     _updateDataFromServer();
@@ -126,11 +131,11 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // Inicia el Timer para refrescar el token cada 4min 50s (290s)
+  // Inicia el Timer para refrescar el token cada 4min 10s (250s)
   void _startTokenRefreshTimer() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(
-      Duration(minutes: 4, seconds: 50),
+      Duration(minutes: 4, seconds: 10),
       (_) => _refreshBearerToken(),
     );
   }
@@ -164,11 +169,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (mounted) {
           setState(() {
+            // Actualizamos la variable local para que
+            // se pase correctamente a LupaEmpresaScreen
             bearerToken = newToken;
           });
         }
 
-        // Guardamos el nuevo token en Hive
+        // Guardamos el nuevo token en Hive (para offline)
         await HiveHelper.storeBearerToken(newToken);
 
         // Volvemos a actualizar datos con el nuevo token
@@ -209,15 +216,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Actualiza datos desde el servidor usando el token que tengamos
+  // Actualiza datos desde el servidor usando siempre el token actual (bearerToken)
   Future<void> _updateDataFromServer() async {
     if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
-
-    // Obtenemos el token fresco de Hive
-    String currentToken = HiveHelper.getBearerToken();
 
     try {
       final response = await dio.get(
@@ -225,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> {
         options: Options(
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer $currentToken',
+            'Authorization': 'Bearer $bearerToken',
           },
         ),
       );
@@ -262,7 +266,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        // Guardamos en Hive
+        // Guardamos en Hive para offline
         await HiveHelper.insertGrupos(gruposData);
         gruposData = gruposData.map((g) => Map<String,dynamic>.from(g)).toList();
         grupos = gruposData;
@@ -303,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Prefetch instalaciones en segundo plano
+  // Prefetch instalaciones en segundo plano, usando siempre bearerToken actual
   Future<void> _prefetchInstallationsInBackground() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -328,14 +332,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Descarga e inserta instalaciones de una empresa específica
+  // Descarga e inserta instalaciones de una empresa específica, usando bearerToken actual
   Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       return;
     }
-
-    String currentToken = HiveHelper.getBearerToken();
 
     try {
       final response = await dio.get(
@@ -343,7 +345,7 @@ class _HomeScreenState extends State<HomeScreen> {
         options: Options(
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer $currentToken',
+            'Authorization': 'Bearer $bearerToken',
             'auth-type': 'no-auth',
           },
         ),
@@ -549,15 +551,22 @@ class _HomeScreenState extends State<HomeScreen> {
                       for (var empresa in empresasSinGrupoFiltradas)
                         GestureDetector(
                           onTap: () {
+                            // Vamos directo a LupaEmpresaScreen
                             id_empresas = empresa['id_empresas'].toString();
-                            // Pasamos bearerToken al EmpresaScreen
+                            final String idEmpresaAsociada =
+                                empresa['id_empresa_asociada']?.toString() ?? '';
+
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => EmpresaScreen(
-                                  empresaId: id_empresas,
+                                builder: (context) => LupaEmpresaScreen(
+                                  empresa: empresa,
                                   bearerToken: bearerToken,
-                                  empresaData: empresa,
+                                  idEmpresaAsociada: idEmpresaAsociada,
+                                  empresaId: id_empresas,
+                                  // AÑADIMOS username y password para no romper la firma
+                                  username: widget.username,
+                                  password: widget.password,
                                 ),
                               ),
                             );
@@ -678,13 +687,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                       GestureDetector(
                                         onTap: () {
                                           id_empresas = emp['id_empresas'].toString();
+                                          final String idEmpresaAsociada =
+                                              emp['id_empresa_asociada']?.toString() ?? '';
+
+                                          // Vamos directo a LupaEmpresaScreen
                                           Navigator.push(
                                             context,
                                             MaterialPageRoute(
-                                              builder: (context) => EmpresaScreen(
+                                              builder: (context) => LupaEmpresaScreen(
+                                                empresa: emp,
+                                                bearerToken: bearerToken,
+                                                idEmpresaAsociada: idEmpresaAsociada,
                                                 empresaId: id_empresas,
-                                                bearerToken: bearerToken, // Token actualizado
-                                                empresaData: emp,
+                                                username: widget.username,
+                                                password: widget.password,
                                               ),
                                             ),
                                           );
