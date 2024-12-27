@@ -940,6 +940,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
+  // Escanear DNI
   void _mostrarEscanerQR() {
     showModalBottomSheet(
       context: context,
@@ -952,7 +953,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
               AppBar(
                 backgroundColor: const Color(0xFF2a3666),
                 title: const Text(
-                  'Escanear QR',
+                  'Escanear dni',
                   style: TextStyle(
                     fontFamily: 'Montserrat',
                     color: Colors.white,
@@ -981,24 +982,51 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                   onDetect: (captura) {
                     final List<Barcode> codigosBarras = captura.barcodes;
                     if (codigosBarras.isNotEmpty) {
-                      final String codigo = codigosBarras.first.rawValue ?? '';
+                      final String codigoLeido = codigosBarras.first.rawValue ?? '';
                       Navigator.pop(context);
 
                       try {
-                        final qrData = jsonDecode(codigo);
-                        final entidad = qrData['entidad'];
-
-                        if (entidad == 'empleado') {
-                          final dni = qrData['dni'] ?? 'DNI no disponible';
-                          personalIdController.text = dni;
-                        } else if (entidad == 'vehiculo') {
-                          final dominio = qrData['dominio'] ?? 'Dominio no disponible';
-                          dominioController.text = dominio;
+                        // Intentamos JSON. Si falla, asumimos PDF417/otro.
+                        bool isJson = false;
+                        dynamic decoded;
+                        try {
+                          decoded = jsonDecode(codigoLeido);
+                          isJson = true;
+                        } catch (_) {
+                          // No es JSON
                         }
-                        setState(() {
-                          qrScanned = true;
-                        });
-                      } catch (_) {}
+
+                        if (isJson && decoded != null && decoded is Map<String, dynamic>) {
+                          // Lógica anterior de QR JSON
+                          final entidad = decoded['entidad'];
+                          if (entidad == 'empleado') {
+                            final dni = decoded['dni'] ?? 'DNI no disponible';
+                            personalIdController.text = dni;
+                          } else if (entidad == 'vehiculo') {
+                            final dominio = decoded['dominio'] ?? 'Dominio no disponible';
+                            dominioController.text = dominio;
+                          }
+                          setState(() {
+                            qrScanned = true;
+                          });
+                        } else {
+                          // Lógica para PDF417 del DNI
+                          // Ejemplo: "00123456789@APELLIDO@NOMBRE@F@12345678@A@01/01/2006@31/12/2025"
+                          final partes = codigoLeido.split('@');
+                          // Se asume que el 5to elemento (índice 4) sería el DNI. 
+                          if (partes.length >= 5) {
+                            final dniParseado = partes[4].trim();
+                            if (dniParseado.isNotEmpty) {
+                              personalIdController.text = dniParseado;
+                              setState(() {
+                                qrScanned = true;
+                              });
+                            }
+                          }
+                        }
+                      } catch (_) {
+                        // Error parseando
+                      }
                     }
                   },
                 ),
@@ -1230,7 +1258,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
   @override
   Widget build(BuildContext context) {
-    String botonQrText = qrScanned ? "Ingresar con otro QR" : "Ingreso con QR";
+    // Cambiamos el texto del botón a "Escanear dni"
+    String botonQrText = qrScanned ? "Escanear dni nuevamente" : "Escanear dni";
 
     // Contratistas para el Dropdown, a partir de la lista general (allEmpleadosListarTest)
     List<String> contractorItems = _getContractorsForDropdown();
@@ -1581,7 +1610,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           ],
                           const SizedBox(height: 16),
 
-                          // Botón Ingreso con QR
+                          // Botón "Escanear dni"
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
@@ -1757,7 +1786,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                             TextField(
                               controller: searchController,
                               decoration: InputDecoration(
-                                hintText: 'Buscar por dni o apellido',
+                                hintText: 'Buscar por DNI o Apellido',
                                 hintStyle: const TextStyle(
                                   fontFamily: 'Montserrat',
                                   color: Colors.grey,
