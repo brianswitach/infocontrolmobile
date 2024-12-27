@@ -900,7 +900,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
-  // Filtramos por DNI en la lista "empleados" (la que se obtiene al pulsar "Empleados" tras elegir contratista)
+  // Filtramos por DNI o Apellido en la lista "empleados" (la que se obtiene al pulsar "Empleados" tras elegir contratista)
   void _filterEmployees() {
     String query = searchController.text.toLowerCase().trim();
     if (query.isEmpty) {
@@ -910,8 +910,27 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     } else {
       List<dynamic> temp = [];
       for (var emp in empleados) {
+        // Tomamos el dni
         final dniVal = (emp['valor']?.toString().trim() ?? '').toLowerCase();
-        if (dniVal.startsWith(query)) {
+
+        // Tomamos el apellido (si está en "datos")
+        final datosString = emp['datos']?.toString() ?? '';
+        String apellidoVal = '';
+        if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
+          try {
+            List datosList = jsonDecode(datosString);
+            var apellidoMap = datosList.firstWhere(
+              (item) => item['id'] == "Apellido:",
+              orElse: () => null,
+            );
+            if (apellidoMap != null && apellidoMap['valor'] is String) {
+              apellidoVal = (apellidoMap['valor'] as String).toLowerCase().trim();
+            }
+          } catch (_) {}
+        }
+
+        // Si coincide el DNI o el apellido, lo agregamos
+        if (dniVal.contains(query) || apellidoVal.contains(query)) {
           temp.add(emp);
         }
       }
@@ -1738,7 +1757,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                             TextField(
                               controller: searchController,
                               decoration: InputDecoration(
-                                hintText: 'Buscar por DNI',
+                                hintText: 'Buscar por dni o apellido',
                                 hintStyle: const TextStyle(
                                   fontFamily: 'Montserrat',
                                   color: Colors.grey,
@@ -1784,12 +1803,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                         orElse: () => null,
                                       );
 
-                                      apellidoVal = (apellidoMap != null && apellidoMap['valor'] is String)
-                                          ? (apellidoMap['valor'] as String).trim()
-                                          : '';
-                                      nombreVal = (nombreMap != null && nombreMap['valor'] is String)
-                                          ? (nombreMap['valor'] as String).trim()
-                                          : '';
+                                      if (apellidoMap != null && apellidoMap['valor'] is String) {
+                                        apellidoVal = (apellidoMap['valor'] as String).trim();
+                                      }
+                                      if (nombreMap != null && nombreMap['valor'] is String) {
+                                        nombreVal = (nombreMap['valor'] as String).trim();
+                                      }
 
                                       if (apellidoVal.isEmpty && nombreVal.isEmpty) {
                                         displayName = "No disponible";
