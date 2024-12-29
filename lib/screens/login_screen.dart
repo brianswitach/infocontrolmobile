@@ -112,29 +112,41 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       var connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
-        List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
+        // SIN CONEXIÓN: Comprobamos credenciales offline
+        Navigator.pop(context); // Cerramos el diálogo de "Cargando..."
 
-        // Cerrar el dialogo de cargando
-        Navigator.pop(context);
+        // Recuperamos username y password guardados en Hive
+        final storedUser = HiveHelper.getUsernameOffline();
+        final storedPass = HiveHelper.getPasswordOffline();
 
-        if (localEmpresas.isNotEmpty) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => HomeScreen(
-                bearerToken: bearerToken,
-                empresas: localEmpresas,
-                username: username,
-                password: password,
+        if (storedUser == username && storedPass == password) {
+          // Coinciden: Buscamos empresas locales
+          List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
+          if (localEmpresas.isNotEmpty) {
+            // Hay datos locales, navegamos
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => HomeScreen(
+                  bearerToken: bearerToken,
+                  empresas: localEmpresas,
+                  username: username,
+                  password: password,
+                ),
               ),
-            ),
-          );
+            );
+          } else {
+            // No hay empresas guardadas
+            _showAlertDialog(context, 'No hay conexión y no hay datos locales disponibles.');
+          }
         } else {
-          _showAlertDialog(context, 'No hay conexión y no hay datos locales disponibles.');
+          // Credenciales incorrectas en modo offline
+          _showAlertDialog(context, 'Credenciales incorrectas en modo offline.');
         }
         return;
       }
 
+      // CON CONEXIÓN: Intentamos login con el servidor
       final loginResponse = await dio.post(
         loginUrl,
         options: Options(
@@ -157,9 +169,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
         // Guardar id_usuarios en variable local
         id_usuarios = responseData['data']['userData']['id_usuarios'] ?? '';
-
         // Guardar id_usuarios en Hive
         await HiveHelper.storeIdUsuarios(id_usuarios);
+
+        // GUARDAMOS username y password OFFLINE
+        await HiveHelper.storeUsernameOffline(username);
+        await HiveHelper.storePasswordOffline(password);
 
         setState(() {
           _showPendingMessages = true;
@@ -167,7 +182,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         await sendRequest();
 
-        // Cerrar el dialogo de cargando antes de navegar
+        // Cerrar el dialogo de "Cargando..." antes de navegar
         Navigator.pop(context);
 
         Navigator.push(
@@ -182,20 +197,20 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       } else if (statusCode == 404) {
-        // Cerrar el dialogo de cargando
+        // Cerrar el dialogo de "Cargando..."
         Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       } else {
-        // Cerrar el dialogo de cargando
+        // Cerrar el dialogo de "Cargando..."
         Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       }
     } on DioException catch (e) {
-      // Cerrar el dialogo de cargando
+      // Cerrar el dialogo de "Cargando..."
       Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     } catch (e) {
-      // Cerrar el dialogo de cargando
+      // Cerrar el dialogo de "Cargando..."
       Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     }

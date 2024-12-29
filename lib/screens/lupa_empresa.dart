@@ -8,6 +8,8 @@ import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'hive_helper.dart';
+// IMPORTAMOS LA PANTALLA DE LOGIN PARA FORZAR REAUTENTICACIÓN
+import 'login_screen.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
@@ -195,10 +197,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
         print('Token refrescado correctamente en LupaEmpresa: $newToken');
       } else {
-        throw Exception('Error al actualizar el token en LupaEmpresa: ${response.statusCode}');
+        throw Exception('Recargando...');
       }
     } catch (e) {
-      print('Error al refrescar el token en LupaEmpresa: $e');
+      print('Recargando...');
       // Podrías mostrar un snackbar si prefieres
     }
   }
@@ -255,15 +257,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           isLoading = false;
         });
       } else {
+        // EN LUGAR DE MOSTRAR SNACKBAR, FORZAR REAUTENTICACIÓN
         setState(() {
           isLoading = false;
         });
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al obtener empleados listartest: $statusCode'),
-            backgroundColor: Colors.red,
-          ),
+        // Navegamos a LoginScreen
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => LoginScreen()),
+          (route) => false,
         );
       }
     } on DioException catch (e) {
@@ -271,19 +274,20 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         isLoading = false;
       });
       if (!mounted) return;
+
       if (e.response?.statusCode == 401) {
-        // Token inválido
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Token inválido al obtener listartest. Vuelva a HomeScreen para recargar.'),
-          ),
+        // Token inválido => forzar reautenticación
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => LoginScreen()),
+          (route) => false,
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error en la solicitud: $e'),
-            backgroundColor: Colors.red,
-          ),
+        // Error distinto => también forzar reautenticación para simplificar
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => LoginScreen()),
+          (route) => false,
         );
       }
     } catch (e) {
@@ -291,11 +295,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         isLoading = false;
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error inesperado en la solicitud: $e'),
-          backgroundColor: Colors.red,
-        ),
+      // Error inesperado => forzar reautenticación
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => LoginScreen()),
+        (route) => false,
       );
     }
   }
@@ -363,10 +367,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         if (statusCode == 200) {
           final responseData = response.data;
           List<dynamic> employeesData = responseData['data'] ?? [];
-          final foundEmployee = employeesData.firstWhere(
-            (emp) => emp['valor']?.toString().trim() == dniIngresado,
-            orElse: () => null,
-          );
+
+          // Acá también comparamos con valor / cuit / cuil, por si en offline
+          final foundEmployee = employeesData.firstWhere((emp) {
+            final val = emp['valor']?.toString().trim() ?? '';
+            final cuit = emp['cuit']?.toString().trim() ?? '';
+            final cuil = emp['cuil']?.toString().trim() ?? '';
+            return (val == dniIngresado || cuit == dniIngresado || cuil == dniIngresado);
+          }, orElse: () => null);
+
           if (foundEmployee != null) {
             final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
             final String estado = foundEmployee['estado']?.toString().trim() ?? '';
@@ -417,20 +426,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       return;
     }
 
+    // En la API, "valor" es el DNI. Pero también podría ser cuit/cuil. Tomamos "valor" como DNI si existe
     final dniVal = (empleado['valor']?.toString().trim() ?? '');
-    if (dniVal.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se encontró DNI del empleado.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       // Sin conexión, lo guardamos en pendientes
+      // (Para offline, guardamos lo que esté en "valor", si fuera cuit/cuil
+      //  no lo tendríamos en "valor", así que en offline no se registrarían. 
+      //  Se asume "valor" es DNI en la DB. Si quisieras guardarlo igual, 
+      //  deberías usar la misma lógica que `_processPendingRequests`.)
       await _saveOfflineRequest(dniVal);
       showDialog(
         context: context,
@@ -454,6 +458,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     await _registerMovement(idEntidad);
   }
 
+  // AHORA también busca por cuit o cuil, además de valor (dni).
   Future<void> _buscarPersonalId() async {
     final texto = personalIdController.text.trim();
     if (texto.isEmpty) {
@@ -535,10 +540,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         List<dynamic> employeesData = responseData['data'] ?? [];
         final String dniIngresado = texto;
 
-        final foundEmployee = employeesData.firstWhere(
-          (emp) => emp['valor']?.toString().trim() == dniIngresado,
-          orElse: () => null,
-        );
+        // CAMBIO PRINCIPAL: Comparar contra valor (DNI), cuit y cuil
+        final foundEmployee = employeesData.firstWhere((emp) {
+          final val = emp['valor']?.toString().trim() ?? '';
+          final cuit = emp['cuit']?.toString().trim() ?? '';
+          final cuil = emp['cuil']?.toString().trim() ?? '';
+          return (val == dniIngresado || cuit == dniIngresado || cuil == dniIngresado);
+        }, orElse: () => null);
 
         if (foundEmployee != null) {
           _showEmpleadoDetailsModal(foundEmployee);
@@ -548,7 +556,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
             builder: (ctx) {
               return AlertDialog(
                 title: const Text('No encontrado'),
-                content: const Text('No se encontró el DNI en la respuesta.'),
+                content: const Text('No se encontró el DNI/CUIT/CUIL en la respuesta.'),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(ctx).pop(),
@@ -587,8 +595,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           context: context,
           builder: (ctx) {
             return AlertDialog(
-              title: const Text('Error'),
-              content: Text('Error en la solicitud: $e'),
+              title: const Text(''),
+              content: const Text('Recargando...'),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
@@ -605,8 +613,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         context: context,
         builder: (ctx) {
           return AlertDialog(
-            title: const Text('Error inesperado'),
-            content: Text('Ocurrió un error: $e'),
+            title: const Text('Recargando...'),
+            content: const Text(''),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -720,7 +728,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           builder: (ctx) {
             return AlertDialog(
               title: const Text('Error al registrar movimiento'),
-              content: Text('Error en la solicitud POST: ${e.toString()}'),
+              content: const Text('Recargando...'),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
@@ -868,8 +876,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           context: context,
           builder: (ctx) {
             return AlertDialog(
-              title: const Text('Error'),
-              content: Text('Error en la solicitud: $e'),
+              title: const Text('Recargando...'),
+              content: const Text(''),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
@@ -886,8 +894,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         context: context,
         builder: (ctx) {
           return AlertDialog(
-            title: const Text('Error inesperado'),
-            content: Text('Ocurrió un error: $e'),
+            title: const Text('Recargando...'),
+            content: const Text(''),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -900,7 +908,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
-  // Filtramos por DNI o Apellido en la lista "empleados" (la que se obtiene al pulsar "Empleados" tras elegir contratista)
+  // Filtramos por DNI, Apellido, CUIT o CUIL en la lista "empleados" (la que se obtiene al pulsar "Empleados")
   void _filterEmployees() {
     String query = searchController.text.toLowerCase().trim();
     if (query.isEmpty) {
@@ -912,6 +920,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       for (var emp in empleados) {
         // Tomamos el dni
         final dniVal = (emp['valor']?.toString().trim() ?? '').toLowerCase();
+        // Tomamos cuit y cuil
+        final cuitVal = (emp['cuit']?.toString().trim() ?? '').toLowerCase();
+        final cuilVal = (emp['cuil']?.toString().trim() ?? '').toLowerCase();
 
         // Tomamos el apellido (si está en "datos")
         final datosString = emp['datos']?.toString() ?? '';
@@ -929,8 +940,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           } catch (_) {}
         }
 
-        // Si coincide el DNI o el apellido, lo agregamos
-        if (dniVal.contains(query) || apellidoVal.contains(query)) {
+        // Si coincide el DNI, el apellido, el CUIT o el CUIL
+        if (dniVal.contains(query) || apellidoVal.contains(query) || cuitVal.contains(query) || cuilVal.contains(query)) {
           temp.add(emp);
         }
       }
@@ -953,7 +964,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
               AppBar(
                 backgroundColor: const Color(0xFF2a3666),
                 title: const Text(
-                  'Escanear dni',
+                  'Escanear DNI',
                   style: TextStyle(
                     fontFamily: 'Montserrat',
                     color: Colors.white,
@@ -1786,7 +1797,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                             TextField(
                               controller: searchController,
                               decoration: InputDecoration(
-                                hintText: 'Buscar por DNI o Apellido',
+                                hintText: 'Buscar por Dni, Apellido, Cuit o Cuil',
                                 hintStyle: const TextStyle(
                                   fontFamily: 'Montserrat',
                                   color: Colors.grey,

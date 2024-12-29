@@ -130,6 +130,27 @@ class HiveHelper {
     return box.get('bearer_token', defaultValue: '');
   }
 
+  // ---- CREDENCIALES OFFLINE (NUEVO) ----
+  static Future<void> storeUsernameOffline(String username) async {
+    final box = Hive.box(userDataBoxName);
+    await box.put('usernameoffline', username);
+  }
+
+  static String getUsernameOffline() {
+    final box = Hive.box(userDataBoxName);
+    return box.get('usernameoffline', defaultValue: '');
+  }
+
+  static Future<void> storePasswordOffline(String password) async {
+    final box = Hive.box(userDataBoxName);
+    await box.put('passwordoffline', password);
+  }
+
+  static String getPasswordOffline() {
+    final box = Hive.box(userDataBoxName);
+    return box.get('passwordoffline', defaultValue: '');
+  }
+
   // Solicitudes OFFLINE
   static Future<void> savePendingDNIRequest(Map<String, dynamic> pendingData) async {
     final box = Hive.box(pendingRequestsBoxName);
