@@ -44,8 +44,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   bool showContractorInfo = false;
   bool showEmployees = false;
 
-  // Lista general de empleados que obtenemos de "listartest" (UNA SOLA VEZ al abrir la pantalla o al reanudar).
+  // Lista general de empleados (para listartest).
   List<dynamic> allEmpleadosListarTest = [];
+
+  // Lista de proveedores/contratistas que cargamos desde el nuevo endpoint.
+  List<dynamic> allProveedoresListarTest = [];
 
   // Lista que se mostrará al filtrar por contratista
   List<dynamic> empleados = [];
@@ -106,13 +109,17 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     // Escuchamos cambios en el campo de búsqueda (para filtrar empleados)
     searchController.addListener(_filterEmployees);
 
-    // 1) AL ABRIR LA PANTALLA: Traemos TODOS los empleados con 'listartest' (si hay conexión)
-    //    y los almacenamos en allEmpleadosListarTest. Si NO hay conexión, se usan los datos locales.
+    // 1) AL ABRIR LA PANTALLA: Traemos TODOS los empleados con 'listartest' (si hay conexión).
+    //    Luego, si 'openScannerOnInit = true', abrimos el escáner.
     _fetchAllEmployeesListarTest().then((_) {
       if (widget.openScannerOnInit) {
         _mostrarEscanerQR();
       }
     });
+
+    // 2) TAMBIÉN AL ABRIR LA PANTALLA: Traemos TODOS los proveedores (contratistas)
+    //    desde el nuevo endpoint, usando el mismo id_empresas.
+    _fetchAllProveedoresListar();
   }
 
   // -------- DETECTAR CUANDO LA APP SE REANUDA (RESUMED), p.ej. tras desbloquear el dispositivo --------
@@ -123,7 +130,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     // Cuando el usuario vuelve a la app (ej: desbloquear el dispositivo):
     if (state == AppLifecycleState.resumed) {
       // Mostramos "Cargando..." nuevamente y volvemos a hacer la misma lógica,
-      // pero SOLO si hay conexión. Si NO hay conexión, solo usamos datos locales.
+      // pero SOLO si hay conexión. Si NO hay conexión, solo usamos datos locales para empleados.
       setState(() {
         isLoading = true;
       });
@@ -132,6 +139,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           isLoading = false;
         });
       });
+
+      // También podríamos volver a refrescar la lista de proveedores
+      // si fuera necesario, de la misma manera:
+      // _fetchAllProveedoresListar();
     }
   }
 
@@ -215,7 +226,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     final connectivityResult = await connectivity.checkConnectivity();
 
     if (connectivityResult == ConnectivityResult.none) {
-      // Modo offline:
+      // Modo offline para empleados:
       List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales.isNotEmpty) {
         allEmpleadosListarTest = empleadosLocales;
@@ -304,8 +315,99 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
+  // Carga todos los proveedores/contratistas del nuevo endpoint, usando el mismo id_empresas.
+  Future<void> _fetchAllProveedoresListar() async {
+    setState(() {
+      // Podríamos usar un loader distinto, pero para simplificar usamos el mismo:
+      isLoading = true;
+    });
+
+    final connectivityResult = await connectivity.checkConnectivity();
+
+    if (connectivityResult == ConnectivityResult.none) {
+      // Modo offline para proveedores: no tenemos nada guardado en Hive (a menos que quieras guardarlo).
+      // Por ahora, simplemente no haremos nada.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay conexión para traer proveedores.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      setState(() {
+        isLoading = false;
+      });
+      return;
+    }
+
+    // Si hay conexión, hacemos la solicitud
+    try {
+      final response = await _makeGetRequest(
+        "https://www.infocontrol.tech/web/api/mobile/proveedores/listar",
+        queryParameters: {'id_empresas': widget.empresaId},
+      );
+      final statusCode = response.statusCode ?? 0;
+
+      if (statusCode == 200) {
+        final responseData = response.data;
+        List<dynamic> proveedoresData = responseData['data'] ?? [];
+
+        // Guardamos en "allProveedoresListarTest"
+        allProveedoresListarTest = proveedoresData;
+
+        setState(() {
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          isLoading = false;
+        });
+        if (!mounted) return;
+        // Navegamos a LoginScreen (forzar reautenticación)
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => LoginScreen()),
+          (route) => false,
+        );
+      }
+    } on DioException catch (e) {
+      setState(() {
+        isLoading = false;
+      });
+      if (!mounted) return;
+
+      if (e.response?.statusCode == 401) {
+        // Token inválido => forzar reautenticación
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => LoginScreen()),
+          (route) => false,
+        );
+      } else {
+        // Error distinto => también forzar reautenticación para simplificar
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => LoginScreen()),
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+      });
+      if (!mounted) return;
+      // Error inesperado => forzar reautenticación
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => LoginScreen()),
+        (route) => false,
+      );
+    }
+  }
+
   // Este método se llama al hacer clic en "Empleados" (con un contratista seleccionado).
-  // AHORA ya NO hace ninguna solicitud extra, sino que filtra localmente "allEmpleadosListarTest".
+  // Filtra localmente dentro de la lista general de empleados.
   Future<void> _filtrarEmpleadosDeContratista() async {
     if (selectedContractor == null || selectedContractor!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -319,13 +421,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
     final contractorLower = selectedContractor!.trim().toLowerCase();
 
-    // Filtramos localmente
+    // Filtramos localmente en allEmpleadosListarTest por nombre_razon_social == selectedContractor
     List<dynamic> filtrados = allEmpleadosListarTest.where((emp) {
       final nombreRazonSocial = emp['nombre_razon_social']?.toString().trim().toLowerCase() ?? '';
       return nombreRazonSocial == contractorLower;
     }).toList();
 
-    // Asignamos a empleados y filteredEmpleados
     setState(() {
       empleados = filtrados;
       filteredEmpleados = filtrados;
@@ -378,11 +479,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
           if (foundEmployee != null) {
             final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
-            final String estado = foundEmployee['estado']?.toString().trim() ?? '';
-            if (estado.toLowerCase() == 'inhabilitado') {
-              continue; // No se hace nada
-            }
 
+            // No saltamos si está inhabilitado, lo procesamos igual
             final Map<String, dynamic> postData = {
               'id_empresas': idEmpresas,
               'id_usuarios': idUsuarios,
@@ -405,36 +503,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
+  // AHORA, NO BLOQUEAMOS a los inhabilitados al hacer el ingreso/egreso. 
   Future<void> _hacerIngresoEgresoEmpleado(dynamic empleado) async {
-    final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
-    if (estado == 'inhabilitado') {
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Empleado Inhabilitado'),
-            content: const Text('No se puede hacer el ingreso o egreso para este empleado.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-      return;
-    }
+    // Quitamos la lógica que cancelaba la operación cuando el empleado estaba inhabilitado.
+    // => Todos los empleados (habilitados o inhabilitados) pueden hacer el POST.
 
-    // En la API, "valor" es el DNI. Pero también podría ser cuit/cuil. Tomamos "valor" como DNI si existe
     final dniVal = (empleado['valor']?.toString().trim() ?? '');
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       // Sin conexión, lo guardamos en pendientes
-      // (Para offline, guardamos lo que esté en "valor", si fuera cuit/cuil
-      //  no lo tendríamos en "valor", así que en offline no se registrarían. 
-      //  Se asume "valor" es DNI en la DB. Si quisieras guardarlo igual, 
-      //  deberías usar la misma lógica que `_processPendingRequests`.)
       await _saveOfflineRequest(dniVal);
       showDialog(
         context: context,
@@ -540,7 +617,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         List<dynamic> employeesData = responseData['data'] ?? [];
         final String dniIngresado = texto;
 
-        // CAMBIO PRINCIPAL: Comparar contra valor (DNI), cuit y cuil
+        // Comparar contra valor (DNI), cuit y cuil
         final foundEmployee = employeesData.firstWhere((emp) {
           final val = emp['valor']?.toString().trim() ?? '';
           final cuit = emp['cuit']?.toString().trim() ?? '';
@@ -1022,9 +1099,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           });
                         } else {
                           // Lógica para PDF417 del DNI
-                          // Ejemplo: "00123456789@APELLIDO@NOMBRE@F@12345678@A@01/01/2006@31/12/2025"
                           final partes = codigoLeido.split('@');
-                          // Se asume que el 5to elemento (índice 4) sería el DNI. 
                           if (partes.length >= 5) {
                             final dniParseado = partes[4].trim();
                             if (dniParseado.isNotEmpty) {
@@ -1049,12 +1124,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
+  // NUEVO: Obtenemos los contratistas para el Dropdown desde "allProveedoresListarTest".
   List<String> _getContractorsForDropdown() {
-    // A partir de la lista general (allEmpleadosListarTest), extraemos
-    // todos los "nombre_razon_social" únicos, para el Dropdown
+    // A partir de la lista de proveedores (allProveedoresListarTest), extraemos
+    // todos los "nombre_razon_social" únicos.
     Set<String> contractors = {};
-    for (var emp in allEmpleadosListarTest) {
-      final nombre = emp['nombre_razon_social']?.toString().trim() ?? '';
+    for (var prov in allProveedoresListarTest) {
+      final nombre = prov['nombre_razon_social']?.toString().trim() ?? '';
       if (nombre.isNotEmpty) {
         contractors.add(nombre);
       }
@@ -1064,14 +1140,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     return sorted;
   }
 
-  // Para action_resource (ingreso/egreso)
+  // Para action_resource (ingreso/egreso), AHORA solo se llama en el modal, 
+  // y NO importamos si está habilitado o no, le pegamos igual.
   Future<String> _fetchActionResource(String idEntidad) async {
     try {
-      final postData = {"id_entidad": idEntidad};
+      final postData = {
+        "id_entidad": idEntidad,
+        "id_usuarios": hiveIdUsuarios,
+        "tipo_entidad": "empleado",
+      };
       final response = await _makePostRequest(
         "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
         postData,
       );
+
+      // Imprimimos la respuesta en consola
+      print('[ACTION RESOURCE] Response for $idEntidad => ${response.data}');
 
       if ((response.statusCode ?? 0) == 200) {
         final respData = response.data ?? {};
@@ -1082,14 +1166,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         return '';
       }
     } catch (e) {
+      print('[ACTION RESOURCE] Error => $e');
       return '';
     }
   }
 
   Future<void> _showEmpleadoDetailsModal(dynamic empleado) async {
     final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
+    // Igualmente mostramos la tarjeta de color verde o roja, 
+    // pero no impedimos que llame al endpoint.
     final bool isHabilitado = estado == 'habilitado';
-    final bool contractorIsHabilitado = selectedContractorEstado?.trim().toLowerCase() == 'habilitado';
 
     final datosString = empleado['datos']?.toString() ?? '';
     String apellidoVal = '';
@@ -1121,35 +1207,35 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         ? "No disponible"
         : "$apellidoVal $nombreVal";
 
-    final contratistaSeleccionado = selectedContractor ?? 'No disponible';
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
-
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
 
-    if (isHabilitado && contractorIsHabilitado) {
-      final actionMessage = await _fetchActionResource(idEntidad);
-      if (actionMessage == "REGISTRAR INGRESO") {
-        buttonText = "Registrar Ingreso";
-      } else if (actionMessage == "REGISTRAR EGRESO") {
-        buttonText = "Registrar Egreso";
-      }
+    // Llamamos SIEMPRE a action_resource, independientemente de si está habilitado o no.
+    final actionMessage = await _fetchActionResource(idEntidad);
+
+    // Si la API dice "REGISTRAR INGRESO" o "REGISTRAR EGRESO", ajustamos el texto:
+    if (actionMessage == "REGISTRAR INGRESO") {
+      buttonText = "Registrar Ingreso";
+    } else if (actionMessage == "REGISTRAR EGRESO") {
+      buttonText = "Registrar Egreso";
     }
 
-    bool showActionButton = false;
-    if (isHabilitado && contractorIsHabilitado) {
-      showActionButton = true;
-    }
-
+    // Mostramos el modal.
     showDialog(
       context: context,
       builder: (BuildContext context) {
+        // Contratista seleccionado (por si lo quieres mostrar):
+        final contratistaSeleccionado = selectedContractor ?? 'No disponible';
+
         return AlertDialog(
           content: SingleChildScrollView(
             child: Column(
               children: [
+                // Foto genérica
                 Image.asset('assets/generic.jpg', width: 80, height: 80),
                 const SizedBox(height: 16),
+                // Cinta verde o roja
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                   decoration: BoxDecoration(
@@ -1167,6 +1253,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                   ),
                 ),
                 const SizedBox(height: 16),
+                // Info del empleado
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1206,14 +1293,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cerrar', style: TextStyle(fontFamily: 'Montserrat')),
             ),
-            if (showActionButton)
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _hacerIngresoEgresoEmpleado(empleado);
-                },
-                child: Text(buttonText, style: const TextStyle(fontFamily: 'Montserrat')),
-              ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _hacerIngresoEgresoEmpleado(empleado);
+              },
+              child: Text(buttonText, style: const TextStyle(fontFamily: 'Montserrat')),
+            ),
           ],
         );
       },
@@ -1272,7 +1358,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     // Cambiamos el texto del botón a "Escanear dni"
     String botonQrText = qrScanned ? "Escanear dni nuevamente" : "Escanear dni";
 
-    // Contratistas para el Dropdown, a partir de la lista general (allEmpleadosListarTest)
+    // Contratistas para el Dropdown, a partir de la lista de proveedores (allProveedoresListarTest)
     List<String> contractorItems = _getContractorsForDropdown();
 
     bool isContratistaHabilitado = false;
@@ -1395,7 +1481,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           Divider(color: Colors.grey[300], thickness: 1),
                           const SizedBox(height: 20),
 
-                          // Dropdown Contratista
+                          // Dropdown Contratista (ahora viene de allProveedoresListarTest)
                           const Text(
                             'Contratista',
                             style: TextStyle(
@@ -1430,11 +1516,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   filteredEmpleados.clear();
                                 });
 
-                                // Actualizamos info extra (cuit, estado, etc.)
+                                // Actualizamos info extra (cuit, estado, etc.) desde la lista de proveedores
                                 final contractorLower = value.trim().toLowerCase();
-                                var firstMatch = allEmpleadosListarTest.firstWhere(
-                                  (emp) =>
-                                      (emp['nombre_razon_social']?.toString().trim().toLowerCase() ==
+                                var firstMatch = allProveedoresListarTest.firstWhere(
+                                  (prov) =>
+                                      (prov['nombre_razon_social']?.toString().trim().toLowerCase() ==
                                        contractorLower),
                                   orElse: () => null,
                                 );
