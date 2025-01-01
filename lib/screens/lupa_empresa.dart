@@ -109,28 +109,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     // Escuchamos cambios en el campo de búsqueda (para filtrar empleados)
     searchController.addListener(_filterEmployees);
 
-    // 1) AL ABRIR LA PANTALLA: Traemos TODOS los empleados con 'listartest' (si hay conexión).
-    //    Luego, si 'openScannerOnInit = true', abrimos el escáner.
+    // 1) AL ABRIR LA PANTALLA: Traemos TODOS los empleados con 'listartest'.
     _fetchAllEmployeesListarTest().then((_) {
       if (widget.openScannerOnInit) {
         _mostrarEscanerQR();
       }
     });
 
-    // 2) TAMBIÉN AL ABRIR LA PANTALLA: Traemos TODOS los proveedores (contratistas)
-    //    desde el nuevo endpoint, usando el mismo id_empresas.
+    // 2) Traemos TODOS los proveedores (contratistas).
     _fetchAllProveedoresListar();
   }
 
-  // -------- DETECTAR CUANDO LA APP SE REANUDA (RESUMED), p.ej. tras desbloquear el dispositivo --------
+  // -------- DETECTAR CUANDO LA APP SE REANUDA --------
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-
-    // Cuando el usuario vuelve a la app (ej: desbloquear el dispositivo):
     if (state == AppLifecycleState.resumed) {
-      // Mostramos "Cargando..." nuevamente y volvemos a hacer la misma lógica,
-      // pero SOLO si hay conexión. Si NO hay conexión, solo usamos datos locales para empleados.
       setState(() {
         isLoading = true;
       });
@@ -139,10 +133,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           isLoading = false;
         });
       });
-
-      // También podríamos volver a refrescar la lista de proveedores
-      // si fuera necesario, de la misma manera:
-      // _fetchAllProveedoresListar();
     }
   }
 
@@ -154,16 +144,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     searchController.dispose();
     connectivitySubscription.cancel();
 
-    // Quitamos el observador del ciclo de vida
     WidgetsBinding.instance.removeObserver(this);
-
-    // Cancelamos también el timer local
     _refreshTimerLupa?.cancel();
 
     super.dispose();
   }
 
-  // Inicia el Timer local para refrescar el token cada 4min 10s
   void _startTokenRefreshTimerLupa() {
     _refreshTimerLupa?.cancel();
     _refreshTimerLupa = Timer.periodic(
@@ -172,7 +158,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
-  // Refresca el token usando username y password, en LupaEmpresa
   Future<void> _refreshBearerTokenLupa() async {
     var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -200,10 +185,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         String newToken = loginData['data']['Bearer'];
 
         setState(() {
-          bearerToken = newToken; // actualizamos el token local
+          bearerToken = newToken;
         });
 
-        // Guardamos también en Hive, si quieres mantener todo sincronizado:
         HiveHelper.storeBearerToken(newToken);
 
         print('Token refrescado correctamente en LupaEmpresa: $newToken');
@@ -212,12 +196,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       }
     } catch (e) {
       print('Recargando...');
-      // Podrías mostrar un snackbar si prefieres
     }
   }
 
-  // Carga todos los empleados de "listartest" (si hay conexión) y los guarda en allEmpleadosListarTest.
-  // Si NO hay conexión, solo usa lo que esté guardado localmente (Hive).
   Future<void> _fetchAllEmployeesListarTest() async {
     setState(() {
       isLoading = true;
@@ -226,7 +207,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     final connectivityResult = await connectivity.checkConnectivity();
 
     if (connectivityResult == ConnectivityResult.none) {
-      // Modo offline para empleados:
       List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
       if (empleadosLocales.isNotEmpty) {
         allEmpleadosListarTest = empleadosLocales;
@@ -246,7 +226,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       return;
     }
 
-    // Si hay conexión, hacemos la solicitud
     try {
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
@@ -258,22 +237,17 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         final responseData = response.data;
         List<dynamic> employeesData = responseData['data'] ?? [];
 
-        // Guardamos en "allEmpleadosListarTest"
         allEmpleadosListarTest = employeesData;
-
-        // Guardamos offline en Hive (reutilizamos insertEmpleados)
         HiveHelper.insertEmpleados(widget.empresaId, employeesData);
 
         setState(() {
           isLoading = false;
         });
       } else {
-        // EN LUGAR DE MOSTRAR SNACKBAR, FORZAR REAUTENTICACIÓN
         setState(() {
           isLoading = false;
         });
         if (!mounted) return;
-        // Navegamos a LoginScreen
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => LoginScreen()),
@@ -287,14 +261,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (!mounted) return;
 
       if (e.response?.statusCode == 401) {
-        // Token inválido => forzar reautenticación
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => LoginScreen()),
           (route) => false,
         );
       } else {
-        // Error distinto => también forzar reautenticación para simplificar
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => LoginScreen()),
@@ -306,7 +278,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         isLoading = false;
       });
       if (!mounted) return;
-      // Error inesperado => forzar reautenticación
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => LoginScreen()),
@@ -315,18 +286,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
-  // Carga todos los proveedores/contratistas del nuevo endpoint, usando el mismo id_empresas.
   Future<void> _fetchAllProveedoresListar() async {
     setState(() {
-      // Podríamos usar un loader distinto, pero para simplificar usamos el mismo:
       isLoading = true;
     });
 
     final connectivityResult = await connectivity.checkConnectivity();
 
     if (connectivityResult == ConnectivityResult.none) {
-      // Modo offline para proveedores: no tenemos nada guardado en Hive (a menos que quieras guardarlo).
-      // Por ahora, simplemente no haremos nada.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -341,7 +308,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       return;
     }
 
-    // Si hay conexión, hacemos la solicitud
     try {
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/proveedores/listar",
@@ -353,9 +319,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         final responseData = response.data;
         List<dynamic> proveedoresData = responseData['data'] ?? [];
 
-        // Guardamos en "allProveedoresListarTest"
         allProveedoresListarTest = proveedoresData;
-
         setState(() {
           isLoading = false;
         });
@@ -364,7 +328,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           isLoading = false;
         });
         if (!mounted) return;
-        // Navegamos a LoginScreen (forzar reautenticación)
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => LoginScreen()),
@@ -378,14 +341,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (!mounted) return;
 
       if (e.response?.statusCode == 401) {
-        // Token inválido => forzar reautenticación
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => LoginScreen()),
           (route) => false,
         );
       } else {
-        // Error distinto => también forzar reautenticación para simplificar
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => LoginScreen()),
@@ -397,7 +358,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         isLoading = false;
       });
       if (!mounted) return;
-      // Error inesperado => forzar reautenticación
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => LoginScreen()),
@@ -406,8 +366,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
-  // Este método se llama al hacer clic en "Empleados" (con un contratista seleccionado).
-  // Filtra localmente dentro de la lista general de empleados.
   Future<void> _filtrarEmpleadosDeContratista() async {
     if (selectedContractor == null || selectedContractor!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -420,8 +378,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
 
     final contractorLower = selectedContractor!.trim().toLowerCase();
-
-    // Filtramos localmente en allEmpleadosListarTest por nombre_razon_social == selectedContractor
     List<dynamic> filtrados = allEmpleadosListarTest.where((emp) {
       final nombreRazonSocial = emp['nombre_razon_social']?.toString().trim().toLowerCase() ?? '';
       return nombreRazonSocial == contractorLower;
@@ -434,7 +390,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     });
   }
 
-  // LOGICA DE PROCESOS OFFLINE
   Future<void> _saveOfflineRequest(String dniIngresado) async {
     final Map<String, dynamic> pendingData = {
       "dni": dniIngresado,
@@ -445,7 +400,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     HiveHelper.savePendingDNIRequest(pendingData);
   }
 
-  // Cuando detectamos que hay conexión nuevamente, procesamos los requests pendientes.
   Future<void> _processPendingRequests() async {
     final List<Map<String, dynamic>> pendingRequests = HiveHelper.getAllPendingDNIRequests();
     if (pendingRequests.isEmpty) return;
@@ -458,7 +412,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (dniIngresado.isEmpty) continue;
 
       try {
-        // Primero hacemos GET para buscar empleado
         final response = await _makeGetRequest(
           "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
           queryParameters: {'id_empresas': idEmpresas},
@@ -469,7 +422,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           final responseData = response.data;
           List<dynamic> employeesData = responseData['data'] ?? [];
 
-          // Acá también comparamos con valor / cuit / cuil, por si en offline
           final foundEmployee = employeesData.firstWhere((emp) {
             final val = emp['valor']?.toString().trim() ?? '';
             final cuit = emp['cuit']?.toString().trim() ?? '';
@@ -480,7 +432,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           if (foundEmployee != null) {
             final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
 
-            // No saltamos si está inhabilitado, lo procesamos igual
             final Map<String, dynamic> postData = {
               'id_empresas': idEmpresas,
               'id_usuarios': idUsuarios,
@@ -497,21 +448,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
             }
           }
         }
-      } catch (e) {
-        // Error procesando pendiente offline, continuamos con la siguiente
+      } catch (_) {
+        // Error procesando pendiente offline
       }
     }
   }
 
-  // AHORA, NO BLOQUEAMOS a los inhabilitados al hacer el ingreso/egreso. 
   Future<void> _hacerIngresoEgresoEmpleado(dynamic empleado) async {
-    // Quitamos la lógica que cancelaba la operación cuando el empleado estaba inhabilitado.
-    // => Todos los empleados (habilitados o inhabilitados) pueden hacer el POST.
-
     final dniVal = (empleado['valor']?.toString().trim() ?? '');
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      // Sin conexión, lo guardamos en pendientes
       await _saveOfflineRequest(dniVal);
       showDialog(
         context: context,
@@ -535,7 +481,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     await _registerMovement(idEntidad);
   }
 
-  // AHORA también busca por cuit o cuil, además de valor (dni).
   Future<void> _buscarPersonalId() async {
     final texto = personalIdController.text.trim();
     if (texto.isEmpty) {
@@ -551,7 +496,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      // offline
       await _saveOfflineRequest(texto);
       if (!mounted) return;
       showDialog(
@@ -572,7 +516,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       return;
     }
 
-    // Mostrar "Cargando..."
+    // Loading...
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -617,7 +561,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         List<dynamic> employeesData = responseData['data'] ?? [];
         final String dniIngresado = texto;
 
-        // Comparar contra valor (DNI), cuit y cuil
         final foundEmployee = employeesData.firstWhere((emp) {
           final val = emp['valor']?.toString().trim() ?? '';
           final cuit = emp['cuit']?.toString().trim() ?? '';
@@ -705,7 +648,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   }
 
   Future<void> _registerMovement(String idEntidad) async {
-    // Mostrar "Cargando..."
+    // Loading...
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -795,7 +738,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     } on DioException catch (e) {
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
-        // Token inválido en POST
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Token inválido en POST. Vuelva a HomeScreen para recargar.')),
         );
@@ -867,7 +809,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       return;
     }
 
-    // Verificamos conexión. Si no hay, NO hacemos la solicitud.
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       showDialog(
@@ -888,7 +829,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       return;
     }
 
-    // Mostrar "Cargando..."
+    // Loading...
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -985,7 +926,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
-  // Filtramos por DNI, Apellido, CUIT o CUIL en la lista "empleados" (la que se obtiene al pulsar "Empleados")
+  // Filtrar Empleados
   void _filterEmployees() {
     String query = searchController.text.toLowerCase().trim();
     if (query.isEmpty) {
@@ -995,13 +936,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     } else {
       List<dynamic> temp = [];
       for (var emp in empleados) {
-        // Tomamos el dni
         final dniVal = (emp['valor']?.toString().trim() ?? '').toLowerCase();
-        // Tomamos cuit y cuil
         final cuitVal = (emp['cuit']?.toString().trim() ?? '').toLowerCase();
         final cuilVal = (emp['cuil']?.toString().trim() ?? '').toLowerCase();
 
-        // Tomamos el apellido (si está en "datos")
         final datosString = emp['datos']?.toString() ?? '';
         String apellidoVal = '';
         if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
@@ -1017,7 +955,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           } catch (_) {}
         }
 
-        // Si coincide el DNI, el apellido, el CUIT o el CUIL
         if (dniVal.contains(query) || apellidoVal.contains(query) || cuitVal.contains(query) || cuilVal.contains(query)) {
           temp.add(emp);
         }
@@ -1074,7 +1011,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                       Navigator.pop(context);
 
                       try {
-                        // Intentamos JSON. Si falla, asumimos PDF417/otro.
                         bool isJson = false;
                         dynamic decoded;
                         try {
@@ -1085,7 +1021,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                         }
 
                         if (isJson && decoded != null && decoded is Map<String, dynamic>) {
-                          // Lógica anterior de QR JSON
                           final entidad = decoded['entidad'];
                           if (entidad == 'empleado') {
                             final dni = decoded['dni'] ?? 'DNI no disponible';
@@ -1098,7 +1033,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                             qrScanned = true;
                           });
                         } else {
-                          // Lógica para PDF417 del DNI
                           final partes = codigoLeido.split('@');
                           if (partes.length >= 5) {
                             final dniParseado = partes[4].trim();
@@ -1110,9 +1044,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                             }
                           }
                         }
-                      } catch (_) {
-                        // Error parseando
-                      }
+                      } catch (_) {}
                     }
                   },
                 ),
@@ -1124,10 +1056,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
-  // NUEVO: Obtenemos los contratistas para el Dropdown desde "allProveedoresListarTest".
+  // Contratistas en el Dropdown
   List<String> _getContractorsForDropdown() {
-    // A partir de la lista de proveedores (allProveedoresListarTest), extraemos
-    // todos los "nombre_razon_social" únicos.
     Set<String> contractors = {};
     for (var prov in allProveedoresListarTest) {
       final nombre = prov['nombre_razon_social']?.toString().trim() ?? '';
@@ -1140,9 +1070,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     return sorted;
   }
 
-  // Para action_resource (ingreso/egreso), AHORA solo se llama en el modal, 
-  // y NO importamos si está habilitado o no, le pegamos igual.
-  Future<String> _fetchActionResource(String idEntidad) async {
+  // Endpoint action_resource
+  // Devuelve el "message" (REGISTRAR INGRESO, REGISTRAR EGRESO, etc.)
+  // Pero también, en caso de estar inhabilitado, puede traer docs faltantes en "motivo_con_excepcion".
+  Future<Map<String, dynamic>> _fetchActionResourceData(String idEntidad) async {
     try {
       final postData = {
         "id_entidad": idEntidad,
@@ -1154,27 +1085,24 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         postData,
       );
 
-      // Imprimimos la respuesta en consola
       print('[ACTION RESOURCE] Response for $idEntidad => ${response.data}');
 
       if ((response.statusCode ?? 0) == 200) {
         final respData = response.data ?? {};
         final data = respData['data'] ?? {};
-        final message = data['message'] ?? '';
-        return message;
+        return data;
       } else {
-        return '';
+        return {};
       }
     } catch (e) {
       print('[ACTION RESOURCE] Error => $e');
-      return '';
+      return {};
     }
   }
 
+  // MOSTRAR DETALLES DEL EMPLEADO
   Future<void> _showEmpleadoDetailsModal(dynamic empleado) async {
     final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
-    // Igualmente mostramos la tarjeta de color verde o roja, 
-    // pero no impedimos que llame al endpoint.
     final bool isHabilitado = estado == 'habilitado';
 
     final datosString = empleado['datos']?.toString() ?? '';
@@ -1203,39 +1131,59 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       } catch (_) {}
     }
 
-    final displayName = (apellidoVal.isEmpty && nombreVal.isEmpty)
-        ? "No disponible"
-        : "$apellidoVal $nombreVal";
+    final String displayName =
+        (apellidoVal.isEmpty && nombreVal.isEmpty) ? "No disponible" : "$apellidoVal $nombreVal";
 
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
 
-    // Llamamos SIEMPRE a action_resource, independientemente de si está habilitado o no.
-    final actionMessage = await _fetchActionResource(idEntidad);
+    // Llamamos a action_resourceData para obtener message + docs_faltantes (si inhabilitado).
+    final dataResource = await _fetchActionResourceData(idEntidad);
+    final String actionMessage = dataResource['message']?.toString().trim() ?? '';
 
-    // Si la API dice "REGISTRAR INGRESO" o "REGISTRAR EGRESO", ajustamos el texto:
     if (actionMessage == "REGISTRAR INGRESO") {
       buttonText = "Registrar Ingreso";
     } else if (actionMessage == "REGISTRAR EGRESO") {
       buttonText = "Registrar Egreso";
     }
 
-    // Mostramos el modal.
+    // Revisamos si hay docs faltantes en caso de estar inhabilitado
+    List<String> missingDocs = [];
+    if (!isHabilitado) {
+      // Podemos encontrar docs faltantes en dataResource["motivo_con_excepcion"]["docs_faltantes"]
+      final motivoConExcepcion = dataResource["motivo_con_excepcion"];
+      if (motivoConExcepcion is Map) {
+        final docsFaltantes = motivoConExcepcion["docs_faltantes"];
+        if (docsFaltantes is List) {
+          for (var doc in docsFaltantes) {
+            if (doc is Map) {
+              final nombreDoc = doc["nombre"]?.toString().trim() ?? "";
+              if (nombreDoc.isNotEmpty) {
+                missingDocs.add(nombreDoc);
+              }
+            }
+          }
+        }
+      }
+    }
+    final missingDocsStr = missingDocs.join(", ");
+
+    // Contratista seleccionado
+    final contratistaSeleccionado = selectedContractor ?? 'No disponible';
+
+    // Si el empleado está inhabilitado => Sacar el botón de ingreso/egreso
+    bool showActionButton = isHabilitado; // Solo mostramos botón si está habilitado
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        // Contratista seleccionado (por si lo quieres mostrar):
-        final contratistaSeleccionado = selectedContractor ?? 'No disponible';
-
         return AlertDialog(
           content: SingleChildScrollView(
             child: Column(
               children: [
-                // Foto genérica
                 Image.asset('assets/generic.jpg', width: 80, height: 80),
                 const SizedBox(height: 16),
-                // Cinta verde o roja
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                   decoration: BoxDecoration(
@@ -1253,7 +1201,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Info del empleado
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1283,6 +1230,19 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                         color: Colors.black,
                       ),
                     ),
+                    // Agregamos la documentación faltante SOLO si está inhabilitado
+                    // y si missingDocsStr no está vacío
+                    if (!isHabilitado && missingDocsStr.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Documentación faltante: $missingDocsStr',
+                        style: const TextStyle(
+                          fontFamily: 'Montserrat',
+                          fontSize: 14,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -1293,20 +1253,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cerrar', style: TextStyle(fontFamily: 'Montserrat')),
             ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _hacerIngresoEgresoEmpleado(empleado);
-              },
-              child: Text(buttonText, style: const TextStyle(fontFamily: 'Montserrat')),
-            ),
+            // Si empleado está inhabilitado => NO mostramos botón de registrar ingreso/egreso
+            if (showActionButton)
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _hacerIngresoEgresoEmpleado(empleado);
+                },
+                child: Text(buttonText, style: const TextStyle(fontFamily: 'Montserrat')),
+              ),
           ],
         );
       },
     );
   }
 
-  // GET/POST con bearerToken actual
+  // GET/POST
   Future<Response> _makeGetRequest(String url, {Map<String, dynamic>? queryParameters}) async {
     return await dio.get(
       Uri.parse(url).replace(queryParameters: queryParameters).toString(),
@@ -1355,10 +1317,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
   @override
   Widget build(BuildContext context) {
-    // Cambiamos el texto del botón a "Escanear dni"
     String botonQrText = qrScanned ? "Escanear dni nuevamente" : "Escanear dni";
 
-    // Contratistas para el Dropdown, a partir de la lista de proveedores (allProveedoresListarTest)
     List<String> contractorItems = _getContractorsForDropdown();
 
     bool isContratistaHabilitado = false;
@@ -1481,7 +1441,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           Divider(color: Colors.grey[300], thickness: 1),
                           const SizedBox(height: 20),
 
-                          // Dropdown Contratista (ahora viene de allProveedoresListarTest)
+                          // Dropdown Contratista
                           const Text(
                             'Contratista',
                             style: TextStyle(
@@ -1516,7 +1476,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   filteredEmpleados.clear();
                                 });
 
-                                // Actualizamos info extra (cuit, estado, etc.) desde la lista de proveedores
                                 final contractorLower = value.trim().toLowerCase();
                                 var firstMatch = allProveedoresListarTest.firstWhere(
                                   (prov) =>
@@ -1551,7 +1510,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           ),
                           const SizedBox(height: 20),
 
-                          // Nro. de Identificación
+                          // Nro. Identificación
                           const Text(
                             'Número de Identificación Personal',
                             style: TextStyle(
@@ -1707,7 +1666,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           ],
                           const SizedBox(height: 16),
 
-                          // Botón "Escanear dni"
+                          // Botón Escanear
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
@@ -1744,7 +1703,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                             ),
                           ),
 
-                          // INFORMACIÓN DEL CONTRATISTA
+                          // INFO DEL CONTRATISTA
                           if (showContractorInfo) ...[
                             const SizedBox(height: 30),
                             Container(
@@ -1807,7 +1766,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           ],
                           const SizedBox(height: 30),
 
-                          // BOTONES DE EMPLEADOS Y VEHICULOS
+                          // BOTONES
                           Row(
                             children: [
                               Expanded(
@@ -1855,7 +1814,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           ),
                           const SizedBox(height: 20),
 
-                          // BOTÓN IMPRIMIR
+                          // IMPRIMIR
                           Center(
                             child: ElevatedButton(
                               onPressed: _mostrarProximamente,
@@ -1877,7 +1836,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                             ),
                           ),
 
-                          // LISTA DE EMPLEADOS (cuando showEmployees = true)
+                          // LISTA DE EMPLEADOS
                           if (showEmployees) ...[
                             const SizedBox(height: 30),
                             TextField(
