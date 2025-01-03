@@ -1,4 +1,4 @@
-import 'dart:async'; // <-- IMPORTANTE para Timer y StreamSubscription
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -7,7 +7,9 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
-import 'hive_helper.dart';
+import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
+
 // IMPORTAMOS LA PANTALLA DE LOGIN PARA FORZAR REAUTENTICACIÓN
 import 'login_screen.dart';
 
@@ -69,7 +71,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   late Connectivity connectivity;
   late StreamSubscription<ConnectivityResult> connectivitySubscription;
 
-  String hiveIdUsuarios = '';
+  // Simulamos un id_usuarios local. En el original venía de HiveHelper, aquí lo definimos fijo o dinámico.
+  // En tu caso, ajusta según cómo obtengas el id_usuarios.
+  String hiveIdUsuarios = '12345';
 
   // Mapa para almacenar si un empleado está actualmente dentro (true) o fuera (false).
   Map<String, bool> employeeInsideStatus = {};
@@ -80,14 +84,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   // Timer para refrescar token en LupaEmpresa
   Timer? _refreshTimerLupa;
 
+  // -------------- BOXES DE HIVE --------------
+  // Guardaremos empleados en "employees2", contratistas en "contractors2"
+  // y las solicitudes pendientes en "offlineRequests2".
+
+  Box? employeesBox;       // Para almacenar lista de empleados (key: 'all_employees')
+  Box? contractorsBox;     // Para almacenar lista de contratistas (key: 'all_contractors')
+  Box? offlineRequestsBox; // Para almacenar solicitudes pendientes offline (key: 'requests')
+
+  // ==================== CICLO DE VIDA ====================
   @override
   void initState() {
     super.initState();
-
-    // -------- OBSERVADOR DEL CICLO DE VIDA (para detectar cuando se bloquea/desbloquea el dispositivo) --------
+    // Observador de ciclo de vida
     WidgetsBinding.instance.addObserver(this);
 
-    // Asignamos el token que llega como parámetro
+    // Asignamos token que llega como parámetro
     bearerToken = widget.bearerToken;
 
     cookieJar = CookieJar();
@@ -101,37 +113,53 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       }
     });
 
-    hiveIdUsuarios = HiveHelper.getIdUsuarios();
-
     // Iniciamos un timer local para refrescar el token desde LupaEmpresa
     _startTokenRefreshTimerLupa();
 
     // Escuchamos cambios en el campo de búsqueda (para filtrar empleados)
     searchController.addListener(_filterEmployees);
 
-    // 1) AL ABRIR LA PANTALLA: Traemos TODOS los empleados con 'listartest'.
-    _fetchAllEmployeesListarTest().then((_) {
-      if (widget.openScannerOnInit) {
-        _mostrarEscanerQR();
-      }
-    });
-
-    // 2) Traemos TODOS los proveedores (contratistas).
-    _fetchAllProveedoresListar();
+    // Inicializamos Hive e intentamos abrir las boxes necesarias
+    _initHive().then((_) => _openBoxes().then((_) async {
+          // Una vez que tenemos las boxes, chequeamos la conexión
+          var connectivityResult = await connectivity.checkConnectivity();
+          if (connectivityResult == ConnectivityResult.none) {
+            // SIN CONEXIÓN: Cargamos datos de Hive
+            _loadEmployeesFromHive();
+            _loadContractorsFromHive();
+            setState(() {
+              isLoading = false;
+            });
+            // Si el scanner estaba configurado para abrir al inicio, lo omitimos
+            // porque no tiene mucho sentido sin conexión. 
+            // (Si quisieras igual abrirlo, lo dejas).
+          } else {
+            // CON CONEXIÓN: Traemos datos de la API y guardamos en Hive
+            await _fetchAllEmployeesListarTest();
+            await _fetchAllProveedoresListar();
+            if (widget.openScannerOnInit) {
+              _mostrarEscanerQR();
+            }
+          }
+        }));
   }
 
-  // -------- DETECTAR CUANDO LA APP SE REANUDA --------
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
-      setState(() {
-        isLoading = true;
-      });
-      _fetchAllEmployeesListarTest().then((_) {
-        setState(() {
-          isLoading = false;
-        });
+      // Cuando vuelve al primer plano, chequeamos si hay conexión
+      // y refrescamos lista de empleados (similar a lo que teníamos).
+      connectivity.checkConnectivity().then((connResult) async {
+        if (connResult != ConnectivityResult.none) {
+          setState(() {
+            isLoading = true;
+          });
+          await _fetchAllEmployeesListarTest();
+          setState(() {
+            isLoading = false;
+          });
+        }
       });
     }
   }
@@ -143,13 +171,42 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     dominioController.dispose();
     searchController.dispose();
     connectivitySubscription.cancel();
-
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimerLupa?.cancel();
-
     super.dispose();
   }
 
+  // ==================== HIVE CONFIG ====================
+  Future<void> _initHive() async {
+    // Inicializa Hive en el directorio de documentos de la app
+    final Directory appDocDir = await getApplicationDocumentsDirectory();
+    Hive.init(appDocDir.path);
+  }
+
+  Future<void> _openBoxes() async {
+    // Abre (o crea) la box para empleados
+    if (!Hive.isBoxOpen('employees2')) {
+      employeesBox = await Hive.openBox('employees2');
+    } else {
+      employeesBox = Hive.box('employees2');
+    }
+
+    // Abre (o crea) la box para contratistas
+    if (!Hive.isBoxOpen('contractors2')) {
+      contractorsBox = await Hive.openBox('contractors2');
+    } else {
+      contractorsBox = Hive.box('contractors2');
+    }
+
+    // Abre (o crea) la box para solicitudes offline
+    if (!Hive.isBoxOpen('offlineRequests2')) {
+      offlineRequestsBox = await Hive.openBox('offlineRequests2');
+    } else {
+      offlineRequestsBox = Hive.box('offlineRequests2');
+    }
+  }
+
+  // ==================== TOKEN REFRESH ====================
   void _startTokenRefreshTimerLupa() {
     _refreshTimerLupa?.cancel();
     _refreshTimerLupa = Timer.periodic(
@@ -188,8 +245,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           bearerToken = newToken;
         });
 
-        HiveHelper.storeBearerToken(newToken);
-
         print('Token refrescado correctamente en LupaEmpresa: $newToken');
       } else {
         throw Exception('Recargando...');
@@ -199,6 +254,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
+  // ==================== DESCARGA Y GUARDADO DE EMPLEADOS ====================
   Future<void> _fetchAllEmployeesListarTest() async {
     setState(() {
       isLoading = true;
@@ -207,19 +263,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     final connectivityResult = await connectivity.checkConnectivity();
 
     if (connectivityResult == ConnectivityResult.none) {
-      List<dynamic> empleadosLocales = HiveHelper.getEmpleados(widget.empresaId);
-      if (empleadosLocales.isNotEmpty) {
-        allEmpleadosListarTest = empleadosLocales;
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No hay datos locales de empleados (listartest).'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
+      // Cargar de Hive
+      _loadEmployeesFromHive();
       setState(() {
         isLoading = false;
       });
@@ -238,7 +283,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         List<dynamic> employeesData = responseData['data'] ?? [];
 
         allEmpleadosListarTest = employeesData;
-        HiveHelper.insertEmpleados(widget.empresaId, employeesData);
+        // Guardar en Hive
+        employeesBox?.put('all_employees', employeesData);
 
         setState(() {
           isLoading = false;
@@ -250,7 +296,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         if (!mounted) return;
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()),
+          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
           (route) => false,
         );
       }
@@ -259,17 +305,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         isLoading = false;
       });
       if (!mounted) return;
-
       if (e.response?.statusCode == 401) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()),
+          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
           (route) => false,
         );
       } else {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()),
+          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
           (route) => false,
         );
       }
@@ -280,12 +325,31 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => LoginScreen()),
+        MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
         (route) => false,
       );
     }
   }
 
+  void _loadEmployeesFromHive() {
+    // Cargamos la lista de empleados desde la box employees2
+    List<dynamic> storedEmployees =
+        employeesBox?.get('all_employees', defaultValue: []) as List<dynamic>;
+    if (storedEmployees.isNotEmpty) {
+      allEmpleadosListarTest = storedEmployees;
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay datos locales de empleados (listartest).'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ==================== DESCARGA Y GUARDADO DE CONTRATISTAS ====================
   Future<void> _fetchAllProveedoresListar() async {
     setState(() {
       isLoading = true;
@@ -294,14 +358,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     final connectivityResult = await connectivity.checkConnectivity();
 
     if (connectivityResult == ConnectivityResult.none) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No hay conexión para traer proveedores.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      // Cargar de Hive
+      _loadContractorsFromHive();
       setState(() {
         isLoading = false;
       });
@@ -320,6 +378,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         List<dynamic> proveedoresData = responseData['data'] ?? [];
 
         allProveedoresListarTest = proveedoresData;
+        // Guardar en Hive
+        contractorsBox?.put('all_contractors', proveedoresData);
+
         setState(() {
           isLoading = false;
         });
@@ -330,7 +391,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         if (!mounted) return;
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()),
+          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
           (route) => false,
         );
       }
@@ -339,17 +400,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         isLoading = false;
       });
       if (!mounted) return;
-
       if (e.response?.statusCode == 401) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()),
+          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
           (route) => false,
         );
       } else {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()),
+          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
           (route) => false,
         );
       }
@@ -360,12 +420,31 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => LoginScreen()),
+        MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
         (route) => false,
       );
     }
   }
 
+  void _loadContractorsFromHive() {
+    // Cargamos la lista de contratistas desde la box contractors2
+    List<dynamic> storedContractors =
+        contractorsBox?.get('all_contractors', defaultValue: []) as List<dynamic>;
+    if (storedContractors.isNotEmpty) {
+      allProveedoresListarTest = storedContractors;
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay datos locales de proveedores/contratistas.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ==================== FILTRO DE EMPLEADOS POR CONTRATISTA ====================
   Future<void> _filtrarEmpleadosDeContratista() async {
     if (selectedContractor == null || selectedContractor!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -390,19 +469,33 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     });
   }
 
+  // ==================== OFFLINE REQUESTS ====================
   Future<void> _saveOfflineRequest(String dniIngresado) async {
+    // Obtenemos la lista actual de requests
+    List<dynamic> currentRequests =
+        offlineRequestsBox?.get('requests', defaultValue: []) as List<dynamic>;
+
     final Map<String, dynamic> pendingData = {
       "dni": dniIngresado,
       "id_empresas": widget.empresaId,
       "id_usuarios": hiveIdUsuarios,
       "timestamp": DateTime.now().toIso8601String(),
     };
-    HiveHelper.savePendingDNIRequest(pendingData);
+
+    // Agregamos la nueva solicitud
+    currentRequests.add(pendingData);
+
+    // Guardamos en Hive
+    offlineRequestsBox?.put('requests', currentRequests);
   }
 
   Future<void> _processPendingRequests() async {
-    final List<Map<String, dynamic>> pendingRequests = HiveHelper.getAllPendingDNIRequests();
+    // Obtenemos la lista actual de requests
+    List<dynamic> pendingRequests =
+        offlineRequestsBox?.get('requests', defaultValue: []) as List<dynamic>;
     if (pendingRequests.isEmpty) return;
+
+    List<dynamic> remainingRequests = [];
 
     for (var requestData in pendingRequests) {
       final String dniIngresado = requestData["dni"] ?? '';
@@ -444,16 +537,30 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
             );
 
             if ((postResponse.statusCode ?? 0) == 200) {
-              HiveHelper.removePendingDNIRequest(requestData);
+              // Se procesó con éxito => no volvemos a agregar este request
+            } else {
+              // No se pudo procesar => lo agregamos a las pendientes
+              remainingRequests.add(requestData);
             }
+          } else {
+            // No se encontró => lo agregamos de nuevo
+            remainingRequests.add(requestData);
           }
+        } else {
+          // Respuesta != 200 => reintentamos luego
+          remainingRequests.add(requestData);
         }
       } catch (_) {
-        // Error procesando pendiente offline
+        // Error => reintentamos luego
+        remainingRequests.add(requestData);
       }
     }
+
+    // Guardamos las requests que faltan procesar
+    offlineRequestsBox?.put('requests', remainingRequests);
   }
 
+  // ==================== REGISTRAR MOVIMIENTOS (INGRESO/EGRESO) ====================
   Future<void> _hacerIngresoEgresoEmpleado(dynamic empleado) async {
     final dniVal = (empleado['valor']?.toString().trim() ?? '');
     final connectivityResult = await connectivity.checkConnectivity();
@@ -481,6 +588,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     await _registerMovement(idEntidad);
   }
 
+  // ==================== BÚSQUEDA DE EMPLEADO (DNI/CUIT/CUIL) ====================
   Future<void> _buscarPersonalId() async {
     final texto = personalIdController.text.trim();
     if (texto.isEmpty) {
@@ -496,6 +604,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
+      // Modo offline => guardamos la request
       await _saveOfflineRequest(texto);
       if (!mounted) return;
       showDialog(
@@ -559,6 +668,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (statusCode == 200) {
         final responseData = response.data;
         List<dynamic> employeesData = responseData['data'] ?? [];
+
         final String dniIngresado = texto;
 
         final foundEmployee = employeesData.firstWhere((emp) {
@@ -647,6 +757,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
+  // ==================== REGISTRAR MOVIMIENTO AL SERVIDOR ====================
   Future<void> _registerMovement(String idEntidad) async {
     // Loading...
     showDialog(
@@ -778,6 +889,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
+  // ==================== ESCANER DENTRO DE ESTA PANTALLA ====================
   void _reIniciarPaginaYEscanear() {
     if (!mounted) return;
     Navigator.pushReplacement(
@@ -796,6 +908,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
+  // ==================== BÚSQUEDA POR DOMINIO (VEHÍCULOS/MAQUINARIA) ====================
   Future<void> _buscarDominio() async {
     final texto = dominioController.text.trim();
     if (texto.isEmpty) {
@@ -926,7 +1039,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
-  // Filtrar Empleados
+  // ==================== FILTRO DE EMPLEADOS CON TEXTFIELD ====================
   void _filterEmployees() {
     String query = searchController.text.toLowerCase().trim();
     if (query.isEmpty) {
@@ -955,7 +1068,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           } catch (_) {}
         }
 
-        if (dniVal.contains(query) || apellidoVal.contains(query) || cuitVal.contains(query) || cuilVal.contains(query)) {
+        if (dniVal.contains(query) ||
+            apellidoVal.contains(query) ||
+            cuitVal.contains(query) ||
+            cuilVal.contains(query)) {
           temp.add(emp);
         }
       }
@@ -965,7 +1081,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     }
   }
 
-  // Escanear DNI
+  // ==================== ESCANEAR DNI ====================
   void _mostrarEscanerQR() {
     showModalBottomSheet(
       context: context,
@@ -1056,7 +1172,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
-  // Contratistas en el Dropdown
+  // ==================== DROPDOWN CONTRATISTAS ====================
   List<String> _getContractorsForDropdown() {
     Set<String> contractors = {};
     for (var prov in allProveedoresListarTest) {
@@ -1070,9 +1186,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     return sorted;
   }
 
-  // Endpoint action_resource
-  // Devuelve el "message" (REGISTRAR INGRESO, REGISTRAR EGRESO, etc.)
-  // Pero también, en caso de estar inhabilitado, puede traer docs faltantes en "motivo_con_excepcion".
+  // ==================== ACTION_RESOURCE (para saber si registrar IN/OUT) ====================
   Future<Map<String, dynamic>> _fetchActionResourceData(String idEntidad) async {
     try {
       final postData = {
@@ -1085,8 +1199,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         postData,
       );
 
-      print('[ACTION RESOURCE] Response for $idEntidad => ${response.data}');
-
       if ((response.statusCode ?? 0) == 200) {
         final respData = response.data ?? {};
         final data = respData['data'] ?? {};
@@ -1095,12 +1207,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         return {};
       }
     } catch (e) {
-      print('[ACTION RESOURCE] Error => $e');
       return {};
     }
   }
 
-  // MOSTRAR DETALLES DEL EMPLEADO
+  // ==================== MOSTRAR DETALLES DEL EMPLEADO ====================
   Future<void> _showEmpleadoDetailsModal(dynamic empleado) async {
     final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isHabilitado = estado == 'habilitado';
@@ -1138,7 +1249,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
 
-    // Llamamos a action_resourceData para obtener message + docs_faltantes (si inhabilitado).
+    // Llamamos a action_resourceData para obtener message + docs_faltantes
     final dataResource = await _fetchActionResourceData(idEntidad);
     final String actionMessage = dataResource['message']?.toString().trim() ?? '';
 
@@ -1151,7 +1262,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     // Revisamos si hay docs faltantes en caso de estar inhabilitado
     List<String> missingDocs = [];
     if (!isHabilitado) {
-      // Podemos encontrar docs faltantes en dataResource["motivo_con_excepcion"]["docs_faltantes"]
       final motivoConExcepcion = dataResource["motivo_con_excepcion"];
       if (motivoConExcepcion is Map) {
         final docsFaltantes = motivoConExcepcion["docs_faltantes"];
@@ -1173,7 +1283,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     final contratistaSeleccionado = selectedContractor ?? 'No disponible';
 
     // Si el empleado está inhabilitado => Sacar el botón de ingreso/egreso
-    bool showActionButton = isHabilitado; // Solo mostramos botón si está habilitado
+    bool showActionButton = isHabilitado;
 
     showDialog(
       context: context,
@@ -1230,8 +1340,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                         color: Colors.black,
                       ),
                     ),
-                    // Agregamos la documentación faltante SOLO si está inhabilitado
-                    // y si missingDocsStr no está vacío
                     if (!isHabilitado && missingDocsStr.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(
@@ -1253,7 +1361,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cerrar', style: TextStyle(fontFamily: 'Montserrat')),
             ),
-            // Si empleado está inhabilitado => NO mostramos botón de registrar ingreso/egreso
             if (showActionButton)
               TextButton(
                 onPressed: () {
@@ -1268,7 +1375,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
-  // GET/POST
+  // ==================== GET / POST (DIO) ====================
   Future<Response> _makeGetRequest(String url, {Map<String, dynamic>? queryParameters}) async {
     return await dio.get(
       Uri.parse(url).replace(queryParameters: queryParameters).toString(),
@@ -1296,6 +1403,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
+  // ==================== DEMO (PRÓXIMAMENTE) ====================
   void _mostrarProximamente() {
     if (!mounted) return;
     showDialog(
@@ -1303,7 +1411,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       builder: (ctx) {
         return AlertDialog(
           title: const Text('Próximamente', style: TextStyle(fontFamily: 'Montserrat')),
-          content: const Text('Esta funcionalidad estará disponible próximamente.', style: TextStyle(fontFamily: 'Montserrat')),
+          content: const Text(
+            'Esta funcionalidad estará disponible próximamente.',
+            style: TextStyle(fontFamily: 'Montserrat'),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -1315,12 +1426,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
+  // ==================== BUILD ====================
   @override
   Widget build(BuildContext context) {
     String botonQrText = qrScanned ? "Escanear dni nuevamente" : "Escanear dni";
 
     List<String> contractorItems = _getContractorsForDropdown();
-
     bool isContratistaHabilitado = false;
     if (selectedContractorEstado != null) {
       final estado = selectedContractorEstado!.trim().toLowerCase();
@@ -1905,8 +2016,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                     }
                                   }
 
-                                  String estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
-                                  Color textColor = estado == 'habilitado' ? Colors.green : Colors.red;
+                                  String estado =
+                                      (empleado['estado']?.toString().trim() ?? '').toLowerCase();
+                                  Color textColor =
+                                      estado == 'habilitado' ? Colors.green : Colors.red;
 
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 8),
