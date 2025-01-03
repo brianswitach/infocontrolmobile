@@ -12,6 +12,8 @@ import 'package:path_provider/path_provider.dart';
 
 // IMPORTAMOS LA PANTALLA DE LOGIN PARA FORZAR REAUTENTICACIÓN
 import 'login_screen.dart';
+// IMPORTAMOS HIVE HELPER PARA OBTENER id_usuarios
+import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
@@ -71,9 +73,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   late Connectivity connectivity;
   late StreamSubscription<ConnectivityResult> connectivitySubscription;
 
-  // Simulamos un id_usuarios local. En el original venía de HiveHelper, aquí lo definimos fijo o dinámico.
-  // En tu caso, ajusta según cómo obtengas el id_usuarios.
-  String hiveIdUsuarios = '12345';
+  // id_usuarios que obtenemos de HiveHelper
+  String hiveIdUsuarios = '';
 
   // Mapa para almacenar si un empleado está actualmente dentro (true) o fuera (false).
   Map<String, bool> employeeInsideStatus = {};
@@ -113,6 +114,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       }
     });
 
+    // Obtenemos el id_usuarios desde HiveHelper
+    hiveIdUsuarios = HiveHelper.getIdUsuarios();
+
     // Iniciamos un timer local para refrescar el token desde LupaEmpresa
     _startTokenRefreshTimerLupa();
 
@@ -131,8 +135,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
               isLoading = false;
             });
             // Si el scanner estaba configurado para abrir al inicio, lo omitimos
-            // porque no tiene mucho sentido sin conexión. 
-            // (Si quisieras igual abrirlo, lo dejas).
+            // porque no tiene mucho sentido sin conexión.
           } else {
             // CON CONEXIÓN: Traemos datos de la API y guardamos en Hive
             await _fetchAllEmployeesListarTest();
@@ -296,7 +299,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         if (!mounted) return;
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
+          MaterialPageRoute(builder: (context) => LoginScreen()),
           (route) => false,
         );
       }
@@ -308,13 +311,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (e.response?.statusCode == 401) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
+          MaterialPageRoute(builder: (context) => LoginScreen()),
           (route) => false,
         );
       } else {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
+          MaterialPageRoute(builder: (context) => LoginScreen()),
           (route) => false,
         );
       }
@@ -325,7 +328,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
+        MaterialPageRoute(builder: (context) => LoginScreen()),
         (route) => false,
       );
     }
@@ -391,7 +394,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         if (!mounted) return;
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
+          MaterialPageRoute(builder: (context) => LoginScreen()),
           (route) => false,
         );
       }
@@ -403,13 +406,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (e.response?.statusCode == 401) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
+          MaterialPageRoute(builder: (context) => LoginScreen()),
           (route) => false,
         );
       } else {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
+          MaterialPageRoute(builder: (context) => LoginScreen()),
           (route) => false,
         );
       }
@@ -420,7 +423,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => LoginScreen()), // <-- Se quita el 'const'
+        MaterialPageRoute(builder: (context) => LoginScreen()),
         (route) => false,
       );
     }
@@ -1233,12 +1236,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           orElse: () => null,
         );
 
-        apellidoVal = (apellidoMap != null && apellidoMap['valor'] is String)
-            ? (apellidoMap['valor'] as String).trim()
-            : '';
-        nombreVal = (nombreMap != null && nombreMap['valor'] is String)
-            ? (nombreMap['valor'] as String).trim()
-            : '';
+        if (apellidoMap != null && apellidoMap['valor'] is String) {
+          apellidoVal = (apellidoMap['valor'] as String).trim();
+        }
+        if (nombreMap != null && nombreMap['valor'] is String) {
+          nombreVal = (nombreMap['valor'] as String).trim();
+        }
       } catch (_) {}
     }
 
