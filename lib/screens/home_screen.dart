@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
@@ -12,6 +12,9 @@ import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 // Importamos lupa_empresa.dart para ir directo a LupaEmpresaScreen
 import './lupa_empresa.dart';
+
+// Importa tu HiveHelper o equivalente donde guardas/lees datos locales
+import 'hive_helper.dart';
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
@@ -68,31 +71,60 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Inicia la rutina de refresco cada 4min 10s (250s aprox)
     _startTokenRefreshTimer();
+
+    // Chequeamos la conexión ANTES de todo (lo primero que se hace)
+    _checkConnectionAndLoadData();
+
+    // Configuramos el listener de conectividad
     _setupConnectivityListener();
-    _updateDataFromServer();
+
+    // Escuchamos cambios en el texto de búsqueda
     _searchController.addListener(_onSearchChanged);
   }
 
-  // Configura oyente de conectividad
+  // ---------------------------------------------
+  // DETECTA SI HAY CONEXIÓN Y CARGA DATOS
+  // ---------------------------------------------
+  Future<void> _checkConnectionAndLoadData() async {
+    final connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // No hay conexión -> cargamos datos locales
+      await _loadLocalData();
+      if (mounted) {
+        setState(() {
+          _filterData();
+          _isLoading = false;
+        });
+      }
+    } else {
+      // Hay conexión -> traemos datos del servidor
+      _updateDataFromServer();
+    }
+  }
+
+  // ---------------------------------------------
+  // LISTENER DE CONECTIVIDAD
+  // ---------------------------------------------
   void _setupConnectivityListener() {
-    Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
+    Connectivity().onConnectivityChanged.listen((ConnectivityResult result) async {
       if (result == ConnectivityResult.none) {
         // No hay conexión -> cargamos datos locales
-        _loadLocalData().then((_) {
-          if (!mounted) return;
-          setState(() {
-            _filterData();
-            _isLoading = false;
-          });
+        await _loadLocalData();
+        if (!mounted) return;
+        setState(() {
+          _filterData();
+          _isLoading = false;
         });
       } else {
-        // Hay conexión -> refrescar token
-        _refreshBearerToken();
+        // Hay conexión -> refrescar token (y traer data si corresponde)
+        await _refreshBearerToken();
       }
     });
   }
 
-  // Cada vez que cambie el texto de búsqueda, filtramos
+  // ---------------------------------------------
+  // MANEJO DE BÚSQUEDAS
+  // ---------------------------------------------
   void _onSearchChanged() {
     final query = _searchController.text.toLowerCase().trim();
     setState(() {
@@ -124,6 +156,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
   }
 
+  // ---------------------------------------------
+  // DISPOSE
+  // ---------------------------------------------
   @override
   void dispose() {
     _refreshTimer?.cancel();
@@ -131,7 +166,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // Inicia el Timer para refrescar el token cada 4min 10s (250s)
+  // ---------------------------------------------
+  // RUTINA PARA REFRESCAR TOKEN
+  // ---------------------------------------------
   void _startTokenRefreshTimer() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(
@@ -189,7 +226,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Muestra un snackBar en caso de error
+  // ---------------------------------------------
+  // SNACK BAR DE ERROR
+  // ---------------------------------------------
   void _showErrorSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -197,7 +236,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Carga datos locales (empresas, grupos) si no hay internet
+  // ---------------------------------------------
+  // CARGA DATOS LOCALES (OFFLINE)
+  // ---------------------------------------------
   Future<void> _loadLocalData() async {
     try {
       List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
@@ -216,7 +257,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Actualiza datos desde el servidor usando siempre el token actual (bearerToken)
+  // ---------------------------------------------
+  // ACTUALIZA DATOS DESDE EL SERVIDOR
+  // ---------------------------------------------
   Future<void> _updateDataFromServer() async {
     if (!mounted) return;
     setState(() {
@@ -266,7 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        // Guardamos en Hive para offline
+        // Guardamos grupos y empresas en Hive
         await HiveHelper.insertGrupos(gruposData);
         gruposData = gruposData.map((g) => Map<String,dynamic>.from(g)).toList();
         grupos = gruposData;
@@ -290,6 +333,7 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
 
+        // Prefetch instalaciones en background
         _prefetchInstallationsInBackground();
       } else {
         throw Exception('Server error: ${response.statusCode}');
@@ -297,6 +341,8 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       print('Error updating server data: $e');
       _showErrorSnackBar('Error al actualizar datos del servidor');
+
+      // Si falla, volvemos a cargar local
       await _loadLocalData();
       if (mounted) {
         setState(() {
@@ -307,7 +353,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Prefetch instalaciones en segundo plano, usando siempre bearerToken actual
+  // ---------------------------------------------
+  // PREFETCH DE INSTALACIONES (SINCRONIZA EN BG)
+  // ---------------------------------------------
   Future<void> _prefetchInstallationsInBackground() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -328,11 +376,13 @@ class _HomeScreenState extends State<HomeScreen> {
     int batchSize = 5;
     for (int i = 0; i < empresasSinInstalaciones.length; i += batchSize) {
       final batch = empresasSinInstalaciones.skip(i).take(batchSize).toList();
-      await Future.wait(batch.map((emp) => _fetchAndStoreInstalaciones(emp['id_empresas'].toString())));
+      await Future.wait(
+        batch.map((emp) => _fetchAndStoreInstalaciones(emp['id_empresas'].toString()))
+      );
     }
   }
 
-  // Descarga e inserta instalaciones de una empresa específica, usando bearerToken actual
+  // Descarga e inserta instalaciones de una empresa específica
   Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -371,6 +421,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ---------------------------------------------
+  // WIDGETS DE UI
+  // ---------------------------------------------
   // Badge para mostrar tipo de cliente (directo=Integral, renting=Renting)
   Widget _buildTipoClienteBadge(String tipoCliente) {
     final text = tipoCliente == 'directo' ? 'Integral' : 'Renting';
@@ -446,6 +499,9 @@ class _HomeScreenState extends State<HomeScreen> {
     ).toList();
   }
 
+  // ---------------------------------------------
+  // BUILD
+  // ---------------------------------------------
   @override
   Widget build(BuildContext context) {
     // Filtra las empresas sin grupo que coincidan con la búsqueda
