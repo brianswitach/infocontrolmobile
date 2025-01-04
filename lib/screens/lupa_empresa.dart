@@ -12,7 +12,10 @@ import 'package:path_provider/path_provider.dart';
 
 // IMPORTAMOS LA PANTALLA DE LOGIN PARA FORZAR REAUTENTICACIÓN
 import 'login_screen.dart';
-// IMPORTAMOS HIVE HELPER PARA OBTENER id_usuarios
+
+// **IMPORTAMOS HIVE HELPER** (por si usas otros métodos de helper, 
+// pero ya no usaremos HiveHelper.getIdUsuarios(), 
+// sino que leeremos directamente de la box "id_usuarios2")
 import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
@@ -73,7 +76,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   late Connectivity connectivity;
   late StreamSubscription<ConnectivityResult> connectivitySubscription;
 
-  // id_usuarios que obtenemos de HiveHelper
+  // id_usuarios que obtenemos del box "id_usuarios2" en Hive
   String hiveIdUsuarios = '';
 
   // Mapa para almacenar si un empleado está actualmente dentro (true) o fuera (false).
@@ -85,13 +88,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   // Timer para refrescar token en LupaEmpresa
   Timer? _refreshTimerLupa;
 
-  // -------------- BOXES DE HIVE --------------
+  // ------------ BOXES DE HIVE ------------
   // Guardaremos empleados en "employees2", contratistas en "contractors2"
   // y las solicitudes pendientes en "offlineRequests2".
-
   Box? employeesBox;       // Para almacenar lista de empleados (key: 'all_employees')
   Box? contractorsBox;     // Para almacenar lista de contratistas (key: 'all_contractors')
   Box? offlineRequestsBox; // Para almacenar solicitudes pendientes offline (key: 'requests')
+  Box? idUsuariosBox;      // Para leer id_usuarios desde "id_usuarios2"
 
   // ==================== CICLO DE VIDA ====================
   @override
@@ -114,9 +117,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       }
     });
 
-    // Obtenemos el id_usuarios desde HiveHelper
-    hiveIdUsuarios = HiveHelper.getIdUsuarios();
-
     // Iniciamos un timer local para refrescar el token desde LupaEmpresa
     _startTokenRefreshTimerLupa();
 
@@ -125,26 +125,30 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
     // Inicializamos Hive e intentamos abrir las boxes necesarias
     _initHive().then((_) => _openBoxes().then((_) async {
-          // Una vez que tenemos las boxes, chequeamos la conexión
-          var connectivityResult = await connectivity.checkConnectivity();
-          if (connectivityResult == ConnectivityResult.none) {
-            // SIN CONEXIÓN: Cargamos datos de Hive
-            _loadEmployeesFromHive();
-            _loadContractorsFromHive();
-            setState(() {
-              isLoading = false;
-            });
-            // Si el scanner estaba configurado para abrir al inicio, lo omitimos
-            // porque no tiene mucho sentido sin conexión.
-          } else {
-            // CON CONEXIÓN: Traemos datos de la API y guardamos en Hive
-            await _fetchAllEmployeesListarTest();
-            await _fetchAllProveedoresListar();
-            if (widget.openScannerOnInit) {
-              _mostrarEscanerQR();
-            }
-          }
-        }));
+      // Luego abrimos la box "id_usuarios2" para leer el valor de id_usuarios
+      await _openIdUsuariosBox();
+      _readIdUsuariosFromBox(); // Cargamos hiveIdUsuarios
+
+      // Chequeamos la conexión
+      var connectivityResult = await connectivity.checkConnectivity();
+      if (connectivityResult == ConnectivityResult.none) {
+        // SIN CONEXIÓN: Cargamos datos de Hive
+        _loadEmployeesFromHive();
+        _loadContractorsFromHive();
+        setState(() {
+          isLoading = false;
+        });
+        // Si el scanner estaba configurado para abrir al inicio, lo omitimos
+        // porque no tiene mucho sentido sin conexión.
+      } else {
+        // CON CONEXIÓN: Traemos datos de la API y guardamos en Hive
+        await _fetchAllEmployeesListarTest();
+        await _fetchAllProveedoresListar();
+        if (widget.openScannerOnInit) {
+          _mostrarEscanerQR();
+        }
+      }
+    }));
   }
 
   @override
@@ -206,6 +210,27 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       offlineRequestsBox = await Hive.openBox('offlineRequests2');
     } else {
       offlineRequestsBox = Hive.box('offlineRequests2');
+    }
+  }
+
+  // Abrimos la box "id_usuarios2" para leer id_usuarios
+  Future<void> _openIdUsuariosBox() async {
+    if (!Hive.isBoxOpen('id_usuarios2')) {
+      idUsuariosBox = await Hive.openBox('id_usuarios2');
+    } else {
+      idUsuariosBox = Hive.box('id_usuarios2');
+    }
+  }
+
+  // Leemos el valor guardado en la box "id_usuarios2" (key: 'id_usuarios_key')
+  void _readIdUsuariosFromBox() {
+    if (idUsuariosBox != null) {
+      final storedId = idUsuariosBox?.get('id_usuarios_key', defaultValue: '');
+      if (storedId is String) {
+        hiveIdUsuarios = storedId;
+      } else {
+        hiveIdUsuarios = '';
+      }
     }
   }
 
@@ -796,9 +821,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     try {
       final Map<String, dynamic> postData = {
         'id_empresas': widget.empresaId,
-        'id_usuarios': hiveIdUsuarios,
+        'id_usuarios': hiveIdUsuarios, // Leído de la box id_usuarios2
         'id_entidad': idEntidad,
       };
+
+      // ------ AÑADIMOS EL PRINT PARA VER EL PARÁMETRO ------
+      print("==> REGISTER_MOVEMENT param: $postData");
 
       final postResponse = await _makePostRequest(
         "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
@@ -1194,9 +1222,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     try {
       final postData = {
         "id_entidad": idEntidad,
-        "id_usuarios": hiveIdUsuarios,
+        "id_usuarios": hiveIdUsuarios, // Leído de box
         "tipo_entidad": "empleado",
       };
+
+      // ------ AÑADIMOS EL PRINT PARA VER EL PARÁMETRO ------
+      print("==> ACTION_RESOURCE param: $postData");
+
       final response = await _makePostRequest(
         "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
         postData,

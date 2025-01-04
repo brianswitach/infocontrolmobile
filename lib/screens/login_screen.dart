@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -28,6 +30,9 @@ class _LoginScreenState extends State<LoginScreen> {
   late Dio dio;
   late CookieJar cookieJar;
 
+  // Box para guardar id_usuarios en "id_usuarios2"
+  Box? idUsuariosBox;
+
   @override
   void initState() {
     super.initState();
@@ -38,6 +43,22 @@ class _LoginScreenState extends State<LoginScreen> {
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
+
+    // Inicializamos Hive y abrimos la box "id_usuarios2" para guardar el valor
+    _initHive().then((_) => _openIdUsuariosBox());
+  }
+
+  Future<void> _initHive() async {
+    final dir = await getApplicationDocumentsDirectory();
+    Hive.init(dir.path);
+  }
+
+  Future<void> _openIdUsuariosBox() async {
+    if (!Hive.isBoxOpen('id_usuarios2')) {
+      idUsuariosBox = await Hive.openBox('id_usuarios2');
+    } else {
+      idUsuariosBox = Hive.box('id_usuarios2');
+    }
   }
 
   @override
@@ -104,9 +125,9 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
 
-    String loginUrl = "https://www.infocontrol.tech/web/api/mobile/service/login"; 
-    String username = _usernameController.text;
-    String password = _passwordController.text;
+    String loginUrl = "https://www.infocontrol.tech/web/api/mobile/service/login";
+    String username = _usernameController.text.trim();
+    String password = _passwordController.text.trim();
     String basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
 
     try {
@@ -115,11 +136,16 @@ class _LoginScreenState extends State<LoginScreen> {
         // SIN CONEXIÓN: Comprobamos credenciales offline
         Navigator.pop(context); // Cerramos el diálogo de "Cargando..."
 
-        // Recuperamos username y password guardados en Hive
         final storedUser = HiveHelper.getUsernameOffline();
         final storedPass = HiveHelper.getPasswordOffline();
 
-        if (storedUser == username && storedPass == password) {
+        // Chequeamos si coinciden con las que se ingresaron
+        if (storedUser != null &&
+            storedUser.isNotEmpty &&
+            storedPass != null &&
+            storedPass.isNotEmpty &&
+            storedUser == username &&
+            storedPass == password) {
           // Coinciden: Buscamos empresas locales
           List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
           if (localEmpresas.isNotEmpty) {
@@ -128,7 +154,7 @@ class _LoginScreenState extends State<LoginScreen> {
               context,
               MaterialPageRoute(
                 builder: (context) => HomeScreen(
-                  bearerToken: bearerToken,
+                  bearerToken: bearerToken, // Será vacío offline, pero se conserva
                   empresas: localEmpresas,
                   username: username,
                   password: password,
@@ -165,14 +191,16 @@ class _LoginScreenState extends State<LoginScreen> {
       final responseData = loginResponse.data;
 
       if (statusCode == 200) {
-        bearerToken = responseData['data']['Bearer'];
+        bearerToken = responseData['data']['Bearer'] ?? '';
 
         // Guardar id_usuarios en variable local
-        id_usuarios = responseData['data']['userData']['id_usuarios'] ?? '';
-        // Guardar id_usuarios en Hive
-        await HiveHelper.storeIdUsuarios(id_usuarios);
+        final userData = responseData['data']['userData'] ?? {};
+        id_usuarios = userData['id_usuarios']?.toString() ?? '';
 
-        // GUARDAMOS username y password OFFLINE
+        // GUARDAR id_usuarios en la box "id_usuarios2"
+        await _storeIdUsuariosInBox(id_usuarios);
+
+        // Guardamos las credenciales offline en caso de que quiera usarse sin conexión
         await HiveHelper.storeUsernameOffline(username);
         await HiveHelper.storePasswordOffline(password);
 
@@ -197,23 +225,34 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       } else if (statusCode == 404) {
-        // Cerrar el dialogo de "Cargando..."
+        // Cerrar el diálogo de "Cargando..."
         Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       } else {
-        // Cerrar el dialogo de "Cargando..."
+        // Cerrar el diálogo de "Cargando..."
         Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       }
     } on DioException catch (e) {
-      // Cerrar el dialogo de "Cargando..."
       Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     } catch (e) {
-      // Cerrar el dialogo de "Cargando..."
       Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     }
+  }
+
+  // Método para guardar el id_usuarios en la box "id_usuarios2"
+  Future<void> _storeIdUsuariosInBox(String idUsuariosValue) async {
+    if (idUsuariosBox == null) {
+      // Si no está abierta la box, la abrimos
+      if (!Hive.isBoxOpen('id_usuarios2')) {
+        idUsuariosBox = await Hive.openBox('id_usuarios2');
+      } else {
+        idUsuariosBox = Hive.box('id_usuarios2');
+      }
+    }
+    idUsuariosBox?.put('id_usuarios_key', idUsuariosValue);
   }
 
   Future<void> sendRequest() async {
@@ -234,6 +273,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final responseData = response.data;
         empresas = List<Map<String, dynamic>>.from(responseData['data']);
 
+        // Guardamos empresas en Hive
         await HiveHelper.insertEmpresas(empresas);
 
         setState(() {
@@ -291,6 +331,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // LOGO
               Padding(
                 padding: const EdgeInsets.only(bottom: 20, top: 60),
                 child: Image.asset(
@@ -298,6 +339,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   width: 165,
                 ),
               ),
+
+              // CARD de LOGIN
               Container(
                 width: MediaQuery.of(context).size.width * 0.85,
                 padding: EdgeInsets.all(20),
@@ -427,6 +470,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
               ),
+
+              // Sección inferior
               SizedBox(height: 20),
               Container(
                 width: MediaQuery.of(context).size.width * 0.85,
