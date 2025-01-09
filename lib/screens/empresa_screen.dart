@@ -8,7 +8,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 class EmpresaScreen extends StatefulWidget {
-  final String empresaId;  // id_empresas
+  final String empresaId; // id_empresas
   final String bearerToken; // <--- Recibe el token actualizado desde HomeScreen
   final Map<String, dynamic> empresaData;
 
@@ -42,7 +42,8 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
     Map<String, dynamic> empresaData = widget.empresaData;
     if (empresaData.isNotEmpty) {
       empresaNombre = empresaData['nombre'] ?? 'Nombre de la empresa';
-      empresaInicial = empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
+      empresaInicial =
+          empresaNombre.isNotEmpty ? empresaNombre[0].toUpperCase() : 'E';
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -112,15 +113,16 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
 
         if (responseData['data']['instalaciones'] != null) {
           instalacionesData = List<Map<String, dynamic>>.from(
-            responseData['data']['instalaciones'].map((inst) => Map<String,dynamic>.from(inst))
-          );
+              responseData['data']['instalaciones']
+                  .map((inst) => Map<String, dynamic>.from(inst)));
         }
 
         instalacionesData = instalacionesData
             .where((inst) => inst['id_empresas'].toString() == widget.empresaId)
             .toList();
 
-        await HiveHelper.insertInstalaciones(widget.empresaId, instalacionesData);
+        await HiveHelper.insertInstalaciones(
+            widget.empresaId, instalacionesData);
 
         setState(() {
           instalaciones = instalacionesData;
@@ -129,7 +131,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
 
         // Cerrar el dialogo "Cargando..."
         Navigator.pop(context);
-
       } else {
         _loadInstalacionesFromHive();
       }
@@ -140,9 +141,13 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
   }
 
   void _loadInstalacionesFromHive() {
-    List<Map<String, dynamic>> instalacionesData = HiveHelper.getInstalaciones(widget.empresaId);
-    instalacionesData = instalacionesData.map((e) => Map<String,dynamic>.from(e)).toList();
-    instalacionesData = instalacionesData.where((inst) => inst['id_empresas'].toString() == widget.empresaId).toList();
+    List<Map<String, dynamic>> instalacionesData =
+        HiveHelper.getInstalaciones(widget.empresaId);
+    instalacionesData =
+        instalacionesData.map((e) => Map<String, dynamic>.from(e)).toList();
+    instalacionesData = instalacionesData
+        .where((inst) => inst['id_empresas'].toString() == widget.empresaId)
+        .toList();
 
     setState(() {
       instalaciones = instalacionesData;
@@ -176,7 +181,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    String tipoCliente = widget.empresaData['tipo_cliente'] ?? '';
+    // descomentar esto si lo voy a usar String tipoCliente = widget.empresaData['tipo_cliente'] ?? '';
 
     return Scaffold(
       appBar: PreferredSize(
@@ -197,7 +202,8 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                       empresaId: widget.empresaId,
                       bearerToken: widget.bearerToken, // Pasa el mismo token
                       idEmpresaAsociada: widget.empresaId,
-                      empresa: widget.empresaData,
+                      empresa: widget.empresaData, username: '', password: '',
+                      //justo aca arriba sacar esto:
                     ),
                   ),
                 );
@@ -357,7 +363,8 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                     decoration: TextDecoration.none,
                   ),
                 ),
-                _buildTipoClienteBadge(widget.empresaData['tipo_cliente'] ?? ''),
+                _buildTipoClienteBadge(
+                    widget.empresaData['tipo_cliente'] ?? ''),
               ],
             ),
             SizedBox(height: 30),
@@ -376,7 +383,8 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                instalaciones[index]['nombre'] ?? 'Nombre de la instalación',
+                                instalaciones[index]['nombre'] ??
+                                    'Nombre de la instalación',
                                 style: TextStyle(
                                   fontFamily: 'Montserrat',
                                   fontSize: 14,

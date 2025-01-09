@@ -7,14 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:hive/hive.dart'; // <--- Import necesario para usar Hive localmente
-
-// Eliminamos import de empresa_screen.dart
-// import './empresa_screen.dart';
-
-// Importamos lupa_empresa.dart para ir directo a LupaEmpresaScreen
 import './lupa_empresa.dart';
-
-// Importa tu HiveHelper o equivalente donde guardas/lees datos locales
 import 'hive_helper.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -36,7 +29,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool _showPendingMessages = false;
+  // Eliminamos _showPendingMessages (unused_field) si ya no se usa
   late String bearerToken;
   Timer? _refreshTimer;
   List<Map<String, dynamic>> empresas = [];
@@ -60,25 +53,25 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
 
-    // Inicializamos Hive (por si fuera necesario en este archivo)
+    // Inicializamos Hive
     _initHive();
 
-    // Recibimos el token inicial y la lista de empresas, username y password
+    // Recibimos el token inicial y la lista de empresas
     bearerToken = widget.bearerToken;
-    empresas = widget.empresas; // Pueden venir vacías si login offline no tuvo datos
+    empresas = widget.empresas;
     empresasFiltradas = widget.empresas;
 
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
-    // Guardamos el token inicial en Hive (para offline si se requiere)
+    // Guardamos el token inicial en Hive (para offline)
     HiveHelper.storeBearerToken(bearerToken);
 
     // Inicia la rutina de refresco cada 4min 10s (250s aprox)
     _startTokenRefreshTimer();
 
-    // Chequeamos la conexión ANTES de todo (lo primero que se hace)
+    // Chequeamos la conexión ANTES de todo
     _checkConnectionAndLoadData();
 
     // Configuramos el listener de conectividad
@@ -117,7 +110,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // LISTENER DE CONECTIVIDAD
   // ---------------------------------------------
   void _setupConnectivityListener() {
-    Connectivity().onConnectivityChanged.listen((ConnectivityResult result) async {
+    Connectivity()
+        .onConnectivityChanged
+        .listen((ConnectivityResult result) async {
       if (result == ConnectivityResult.none) {
         // No hay conexión -> cargamos datos locales
         await _loadLocalData();
@@ -198,7 +193,8 @@ class _HomeScreenState extends State<HomeScreen> {
         options: Options(
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
+            'Authorization':
+                'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
           },
         ),
         data: jsonEncode({
@@ -209,7 +205,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final loginData = response.data;
-        String newToken = (loginData['data']['Bearer'] ?? '').toString();
+        // Si no puede ser nulo, quitamos ?? ''
+        String newToken = (loginData['data']['Bearer']).toString();
 
         if (mounted) {
           setState(() {
@@ -246,12 +243,14 @@ class _HomeScreenState extends State<HomeScreen> {
   // ---------------------------------------------
   Future<void> _loadLocalData() async {
     try {
-      List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas() ?? [];
-      // Convertimos a List<Map> en caso de que venga como List<dynamic>
-      localEmpresas = localEmpresas.map((e) => Map<String, dynamic>.from(e)).toList();
+      // Asumiendo que getEmpresas() y getGrupos() retornan List<Map<String, dynamic>>
+      List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
+      localEmpresas =
+          localEmpresas.map((e) => Map<String, dynamic>.from(e)).toList();
 
-      List<Map<String, dynamic>> localGrupos = HiveHelper.getGrupos() ?? [];
-      localGrupos = localGrupos.map((e) => Map<String, dynamic>.from(e)).toList();
+      List<Map<String, dynamic>> localGrupos = HiveHelper.getGrupos();
+      localGrupos =
+          localGrupos.map((e) => Map<String, dynamic>.from(e)).toList();
 
       empresas = localEmpresas;
       grupos = localGrupos;
@@ -291,10 +290,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final responseData = response.data;
 
-        List<dynamic> rawData = responseData['data'] ?? [];
-        List<Map<String, dynamic>> empresasData = rawData
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+        // Si data no puede ser null, removemos ?? []
+        List<dynamic> rawData = responseData['data'];
+        List<Map<String, dynamic>> empresasData =
+            rawData.map((e) => Map<String, dynamic>.from(e)).toList();
 
         Set<String> gruposUnicos = {};
         List<Map<String, dynamic>> gruposData = [];
@@ -306,8 +305,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Agrupamos según "grupo"
         for (var empresa in empresasData) {
-          final grupoNombre = (empresa['grupo'] ?? '').toString();
-          final grupoId = (empresa['id_grupos'] ?? '').toString();
+          // Quitamos ?? '' si no puede ser null
+          final grupoNombre = empresa['grupo'].toString();
+          final grupoId = empresa['id_grupos'].toString();
 
           if (grupoNombre.isNotEmpty && grupoId.isNotEmpty) {
             if (!gruposUnicos.contains(grupoId)) {
@@ -322,12 +322,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Guardamos grupos y empresas en Hive
         await HiveHelper.insertGrupos(gruposData);
-        gruposData = gruposData.map((g) => Map<String, dynamic>.from(g)).toList();
+        gruposData =
+            gruposData.map((g) => Map<String, dynamic>.from(g)).toList();
         grupos = gruposData;
         gruposFiltrados = gruposData;
 
         await HiveHelper.insertEmpresas(empresasData);
-        empresasData = empresasData.map((e) => Map<String, dynamic>.from(e)).toList();
+        empresasData =
+            empresasData.map((e) => Map<String, dynamic>.from(e)).toList();
         empresas = empresasData;
         empresasFiltradas = empresasData;
 
@@ -396,7 +398,7 @@ class _HomeScreenState extends State<HomeScreen> {
         batch.map((emp) {
           final eId = (emp['id_empresas'] ?? '').toString();
           return _fetchAndStoreInstalaciones(eId);
-        })
+        }),
       );
     }
   }
@@ -426,7 +428,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final responseData = response.data;
         final rawInst = responseData['data']['instalaciones'] ?? [];
         List<Map<String, dynamic>> instalacionesData = rawInst
-            .map<Map<String, dynamic>>((inst) => Map<String, dynamic>.from(inst))
+            .map<Map<String, dynamic>>(
+                (inst) => Map<String, dynamic>.from(inst))
             .toList();
 
         // Filtrar solo las que coincidan con la empresa
@@ -439,7 +442,8 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
-      print('Error fetching installations in background for empresa $empresaId: $e');
+      print(
+          'Error fetching installations in background for empresa $empresaId: $e');
     }
   }
 
@@ -527,8 +531,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _saveIdEmpresasLocally(String idEmpresas) async {
     var box = await Hive.openBox('id_empresas2');
     await box.put('id_empresas_key', idEmpresas);
-    // No cerramos la box en caso de que quieras seguir usándola,
-    // pero si deseas cerrarla, haz box.close().
   }
 
   // ---------------------------------------------
@@ -537,7 +539,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     // Filtra las empresas sin grupo que coincidan con la búsqueda
-    List<Map<String, dynamic>> empresasSinGrupoFiltradas = _getEmpresasSinGrupo();
+    List<Map<String, dynamic>> empresasSinGrupoFiltradas =
+        _getEmpresasSinGrupo();
     if (_searchQuery.isNotEmpty) {
       empresasSinGrupoFiltradas = empresasSinGrupoFiltradas.where((empresa) {
         final nombre = (empresa['nombre'] ?? '').toString().toLowerCase();
@@ -597,7 +600,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       TextField(
                         controller: _searchController,
                         decoration: InputDecoration(
-                          prefixIcon: Icon(Icons.search, color: Color(0xFF363f77)),
+                          prefixIcon:
+                              Icon(Icons.search, color: Color(0xFF363f77)),
                           hintText: 'Buscar empresa o grupo',
                           hintStyle: TextStyle(
                             fontFamily: 'Montserrat',
@@ -640,12 +644,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       for (var empresa in empresasSinGrupoFiltradas)
                         GestureDetector(
                           onTap: () async {
-                            id_empresas = (empresa['id_empresas'] ?? '').toString();
+                            id_empresas =
+                                (empresa['id_empresas'] ?? '').toString();
                             // Guardamos el id_empresas en el box "id_empresas2"
                             await _saveIdEmpresasLocally(id_empresas);
 
                             final String idEmpresaAsociada =
-                                (empresa['id_empresa_asociada'] ?? '').toString();
+                                (empresa['id_empresa_asociada'] ?? '')
+                                    .toString();
 
                             Navigator.push(
                               context,
@@ -670,7 +676,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
+                                  // Reemplazamos withOpacity(0.05) => Color.fromRGBO(0,0,0,0.05)
+                                  color: Color.fromRGBO(0, 0, 0, 0.05),
                                   blurRadius: 4,
                                   offset: Offset(0, 2),
                                 ),
@@ -682,7 +689,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
-                                    (empresa['nombre'] ?? 'Empresa sin nombre').toString(),
+                                    (empresa['nombre'] ?? 'Empresa sin nombre')
+                                        .toString(),
                                     style: TextStyle(
                                       fontFamily: 'Montserrat',
                                       fontSize: 16,
@@ -692,7 +700,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                                 SizedBox(width: 10),
-                                _buildTipoClienteBadge(empresa['tipo_cliente'] ?? ''),
+                                _buildTipoClienteBadge(
+                                    empresa['tipo_cliente'] ?? ''),
                               ],
                             ),
                           ),
@@ -746,7 +755,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   borderRadius: BorderRadius.circular(8),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
+                                      color: Color.fromRGBO(0, 0, 0, 0.05),
                                       blurRadius: 4,
                                       offset: Offset(0, 2),
                                     ),
@@ -768,7 +777,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     ),
                                     Icon(
-                                      (_expandedGroups[(grupo['id'] ?? '').toString()] ?? false)
+                                      (_expandedGroups[(grupo['id'] ?? '')
+                                                  .toString()] ??
+                                              false)
                                           ? Icons.expand_less
                                           : Icons.expand_more,
                                       color: Colors.grey,
@@ -779,29 +790,39 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
 
                             // Expandible: mostrará las empresas de este grupo
-                            if (_expandedGroups[(grupo['id'] ?? '').toString()] == true)
+                            if (_expandedGroups[
+                                    (grupo['id'] ?? '').toString()] ==
+                                true)
                               Padding(
-                                padding: const EdgeInsets.only(left: 16, bottom: 20),
+                                padding:
+                                    const EdgeInsets.only(left: 16, bottom: 20),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    for (var emp in _getEmpresasDelGrupo((grupo['id'] ?? '').toString()))
+                                    for (var emp in _getEmpresasDelGrupo(
+                                        (grupo['id'] ?? '').toString()))
                                       GestureDetector(
                                         onTap: () async {
-                                          id_empresas = (emp['id_empresas'] ?? '').toString();
+                                          id_empresas =
+                                              (emp['id_empresas'] ?? '')
+                                                  .toString();
                                           // Guardamos el id_empresas en el box "id_empresas2"
-                                          await _saveIdEmpresasLocally(id_empresas);
+                                          await _saveIdEmpresasLocally(
+                                              id_empresas);
 
                                           final String idEmpresaAsociada =
-                                              (emp['id_empresa_asociada'] ?? '').toString();
+                                              (emp['id_empresa_asociada'] ?? '')
+                                                  .toString();
 
                                           Navigator.push(
                                             context,
                                             MaterialPageRoute(
-                                              builder: (context) => LupaEmpresaScreen(
+                                              builder: (context) =>
+                                                  LupaEmpresaScreen(
                                                 empresa: emp,
                                                 bearerToken: bearerToken,
-                                                idEmpresaAsociada: idEmpresaAsociada,
+                                                idEmpresaAsociada:
+                                                    idEmpresaAsociada,
                                                 empresaId: id_empresas,
                                                 username: widget.username,
                                                 password: widget.password,
@@ -815,10 +836,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                           height: 50,
                                           decoration: BoxDecoration(
                                             color: Colors.white,
-                                            borderRadius: BorderRadius.circular(8),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
                                             boxShadow: [
                                               BoxShadow(
-                                                color: Colors.black.withOpacity(0.05),
+                                                color: Colors.black,
                                                 blurRadius: 4,
                                                 offset: Offset(0, 2),
                                               ),
@@ -826,21 +848,26 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                           child: Row(
                                             children: [
-                                              _buildEmpresaAvatar(emp['nombre']),
+                                              _buildEmpresaAvatar(
+                                                  emp['nombre']),
                                               SizedBox(width: 10),
                                               Expanded(
                                                 child: Text(
-                                                  (emp['nombre'] ?? 'Empresa sin nombre').toString(),
+                                                  (emp['nombre'] ??
+                                                          'Empresa sin nombre')
+                                                      .toString(),
                                                   style: TextStyle(
                                                     fontFamily: 'Montserrat',
                                                     fontSize: 16,
                                                     color: Colors.black,
-                                                    decoration: TextDecoration.none,
+                                                    decoration:
+                                                        TextDecoration.none,
                                                   ),
                                                 ),
                                               ),
                                               SizedBox(width: 10),
-                                              _buildTipoClienteBadge(emp['tipo_cliente'] ?? ''),
+                                              _buildTipoClienteBadge(
+                                                  emp['tipo_cliente'] ?? ''),
                                             ],
                                           ),
                                         ),

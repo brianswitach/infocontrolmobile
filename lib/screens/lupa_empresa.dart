@@ -13,10 +13,9 @@ import 'package:path_provider/path_provider.dart';
 // IMPORTAMOS LA PANTALLA DE LOGIN PARA FORZAR REAUTENTICACIÓN
 import 'login_screen.dart';
 
-// **IMPORTAMOS HIVE HELPER** (por si usas otros métodos de helper, 
-// pero ya no usaremos HiveHelper.getIdUsuarios(), 
+// **IMPORTAMOS HIVE HELPER** (por si usas otros métodos de helper,
+// pero ya no usaremos HiveHelper.getIdUsuarios(),
 // sino que leeremos directamente de la box "id_usuarios2")
-import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
@@ -42,7 +41,8 @@ class LupaEmpresaScreen extends StatefulWidget {
   _LupaEmpresaScreenState createState() => _LupaEmpresaScreenState();
 }
 
-class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindingObserver {
+class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
+    with WidgetsBindingObserver {
   String? selectedContractor;
   String? selectedContractorCuit;
   String? selectedContractorTipo;
@@ -91,10 +91,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   // ------------ BOXES DE HIVE ------------
   // Guardaremos empleados en "employees2", contratistas en "contractors2"
   // y las solicitudes pendientes en "offlineRequests2".
-  Box? employeesBox;       // Para almacenar lista de empleados (key: 'all_employees')
-  Box? contractorsBox;     // Para almacenar lista de contratistas (key: 'all_contractors')
-  Box? offlineRequestsBox; // Para almacenar solicitudes pendientes offline (key: 'requests')
-  Box? idUsuariosBox;      // Para leer id_usuarios desde "id_usuarios2"
+  Box? employeesBox; // Para almacenar lista de empleados (key: 'all_employees')
+  Box?
+      contractorsBox; // Para almacenar lista de contratistas (key: 'all_contractors')
+  Box?
+      offlineRequestsBox; // Para almacenar solicitudes pendientes offline (key: 'requests')
+  Box? idUsuariosBox; // Para leer id_usuarios desde "id_usuarios2"
 
   // ==================== CICLO DE VIDA ====================
   @override
@@ -111,7 +113,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     dio.interceptors.add(CookieManager(cookieJar));
 
     connectivity = Connectivity();
-    connectivitySubscription = connectivity.onConnectivityChanged.listen((ConnectivityResult result) {
+    connectivitySubscription =
+        connectivity.onConnectivityChanged.listen((ConnectivityResult result) {
       if (result != ConnectivityResult.none) {
         _processPendingRequests();
       }
@@ -125,30 +128,30 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
     // Inicializamos Hive e intentamos abrir las boxes necesarias
     _initHive().then((_) => _openBoxes().then((_) async {
-      // Luego abrimos la box "id_usuarios2" para leer el valor de id_usuarios
-      await _openIdUsuariosBox();
-      _readIdUsuariosFromBox(); // Cargamos hiveIdUsuarios
+          // Luego abrimos la box "id_usuarios2" para leer el valor de id_usuarios
+          await _openIdUsuariosBox();
+          _readIdUsuariosFromBox(); // Cargamos hiveIdUsuarios
 
-      // Chequeamos la conexión
-      var connectivityResult = await connectivity.checkConnectivity();
-      if (connectivityResult == ConnectivityResult.none) {
-        // SIN CONEXIÓN: Cargamos datos de Hive
-        _loadEmployeesFromHive();
-        _loadContractorsFromHive();
-        setState(() {
-          isLoading = false;
-        });
-        // Si el scanner estaba configurado para abrir al inicio, lo omitimos
-        // porque no tiene mucho sentido sin conexión.
-      } else {
-        // CON CONEXIÓN: Traemos datos de la API y guardamos en Hive
-        await _fetchAllEmployeesListarTest();
-        await _fetchAllProveedoresListar();
-        if (widget.openScannerOnInit) {
-          _mostrarEscanerQR();
-        }
-      }
-    }));
+          // Chequeamos la conexión
+          var connectivityResult = await connectivity.checkConnectivity();
+          if (connectivityResult == ConnectivityResult.none) {
+            // SIN CONEXIÓN: Cargamos datos de Hive
+            _loadEmployeesFromHive();
+            _loadContractorsFromHive();
+            setState(() {
+              isLoading = false;
+            });
+            // Si el scanner estaba configurado para abrir al inicio, lo omitimos
+            // porque no tiene mucho sentido sin conexión.
+          } else {
+            // CON CONEXIÓN: Traemos datos de la API y guardamos en Hive
+            await _fetchAllEmployeesListarTest();
+            await _fetchAllProveedoresListar();
+            if (widget.openScannerOnInit) {
+              _mostrarEscanerQR();
+            }
+          }
+        }));
   }
 
   @override
@@ -256,7 +259,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         options: Options(
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
+            'Authorization':
+                'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
           },
         ),
         data: jsonEncode({
@@ -456,8 +460,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
   void _loadContractorsFromHive() {
     // Cargamos la lista de contratistas desde la box contractors2
-    List<dynamic> storedContractors =
-        contractorsBox?.get('all_contractors', defaultValue: []) as List<dynamic>;
+    List<dynamic> storedContractors = contractorsBox
+        ?.get('all_contractors', defaultValue: []) as List<dynamic>;
     if (storedContractors.isNotEmpty) {
       allProveedoresListarTest = storedContractors;
     } else {
@@ -486,7 +490,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
     final contractorLower = selectedContractor!.trim().toLowerCase();
     List<dynamic> filtrados = allEmpleadosListarTest.where((emp) {
-      final nombreRazonSocial = emp['nombre_razon_social']?.toString().trim().toLowerCase() ?? '';
+      final nombreRazonSocial =
+          emp['nombre_razon_social']?.toString().trim().toLowerCase() ?? '';
       return nombreRazonSocial == contractorLower;
     }).toList();
 
@@ -547,11 +552,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
             final val = emp['valor']?.toString().trim() ?? '';
             final cuit = emp['cuit']?.toString().trim() ?? '';
             final cuil = emp['cuil']?.toString().trim() ?? '';
-            return (val == dniIngresado || cuit == dniIngresado || cuil == dniIngresado);
+            return (val == dniIngresado ||
+                cuit == dniIngresado ||
+                cuil == dniIngresado);
           }, orElse: () => null);
 
           if (foundEmployee != null) {
-            final String idEntidad = foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
+            final String idEntidad =
+                foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
 
             final Map<String, dynamic> postData = {
               'id_empresas': idEmpresas,
@@ -599,7 +607,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         builder: (ctx) {
           return AlertDialog(
             title: const Text('Modo offline'),
-            content: const Text('Se guardó para registrar cuando vuelva la conexión.'),
+            content: const Text(
+                'Se guardó para registrar cuando vuelva la conexión.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -640,7 +649,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         builder: (ctx) {
           return AlertDialog(
             title: const Text('Modo offline'),
-            content: const Text('Se guardó para registrar cuando vuelva la conexión.'),
+            content: const Text(
+                'Se guardó para registrar cuando vuelva la conexión.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -703,7 +713,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           final val = emp['valor']?.toString().trim() ?? '';
           final cuit = emp['cuit']?.toString().trim() ?? '';
           final cuil = emp['cuil']?.toString().trim() ?? '';
-          return (val == dniIngresado || cuit == dniIngresado || cuil == dniIngresado);
+          return (val == dniIngresado ||
+              cuit == dniIngresado ||
+              cuil == dniIngresado);
         }, orElse: () => null);
 
         if (foundEmployee != null) {
@@ -714,7 +726,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
             builder: (ctx) {
               return AlertDialog(
                 title: const Text('No encontrado'),
-                content: const Text('No se encontró el DNI/CUIT/CUIL en la respuesta.'),
+                content: const Text(
+                    'No se encontró el DNI/CUIT/CUIL en la respuesta.'),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(ctx).pop(),
@@ -746,7 +759,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Token inválido. Vuelva a HomeScreen para recargar.')),
+          const SnackBar(
+              content:
+                  Text('Token inválido. Vuelva a HomeScreen para recargar.')),
         );
       } else {
         showDialog(
@@ -840,7 +855,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
       if (statusCode == 200) {
         final dynamic dataObject = fullResponse['data'] ?? {};
-        final String messageToShow = dataObject['message'] ?? 'Mensaje no disponible';
+        final String messageToShow =
+            dataObject['message'] ?? 'Mensaje no disponible';
 
         bool isInside = employeeInsideStatus[idEntidad] ?? false;
         employeeInsideStatus[idEntidad] = !isInside;
@@ -881,7 +897,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Token inválido en POST. Vuelva a HomeScreen para recargar.')),
+          const SnackBar(
+              content: Text(
+                  'Token inválido en POST. Vuelva a HomeScreen para recargar.')),
         );
       } else {
         showDialog(
@@ -960,7 +978,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
         builder: (ctx) {
           return AlertDialog(
             title: const Text('Modo offline'),
-            content: const Text('No hay conexión para solicitar datos del dominio.'),
+            content:
+                const Text('No hay conexión para solicitar datos del dominio.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -1031,7 +1050,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       Navigator.pop(context);
       if (e.response?.statusCode == 401) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Token inválido en GET. Vuelva a HomeScreen para recargar.')),
+          const SnackBar(
+              content: Text(
+                  'Token inválido en GET. Vuelva a HomeScreen para recargar.')),
         );
       } else {
         showDialog(
@@ -1086,7 +1107,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
         final datosString = emp['datos']?.toString() ?? '';
         String apellidoVal = '';
-        if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
+        if (datosString.isNotEmpty &&
+            datosString.startsWith('[') &&
+            datosString.endsWith(']')) {
           try {
             List datosList = jsonDecode(datosString);
             var apellidoMap = datosList.firstWhere(
@@ -1094,7 +1117,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
               orElse: () => null,
             );
             if (apellidoMap != null && apellidoMap['valor'] is String) {
-              apellidoVal = (apellidoMap['valor'] as String).toLowerCase().trim();
+              apellidoVal =
+                  (apellidoMap['valor'] as String).toLowerCase().trim();
             }
           } catch (_) {}
         }
@@ -1143,7 +1167,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                     onPressed: () => controladorCamara.toggleTorch(),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.flip_camera_android, color: Colors.white),
+                    icon: const Icon(Icons.flip_camera_android,
+                        color: Colors.white),
                     onPressed: () => controladorCamara.switchCamera(),
                   ),
                 ],
@@ -1154,7 +1179,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                   onDetect: (captura) {
                     final List<Barcode> codigosBarras = captura.barcodes;
                     if (codigosBarras.isNotEmpty) {
-                      final String codigoLeido = codigosBarras.first.rawValue ?? '';
+                      final String codigoLeido =
+                          codigosBarras.first.rawValue ?? '';
                       Navigator.pop(context);
 
                       try {
@@ -1167,13 +1193,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           // No es JSON
                         }
 
-                        if (isJson && decoded != null && decoded is Map<String, dynamic>) {
+                        if (isJson &&
+                            decoded != null &&
+                            decoded is Map<String, dynamic>) {
                           final entidad = decoded['entidad'];
                           if (entidad == 'empleado') {
                             final dni = decoded['dni'] ?? 'DNI no disponible';
                             personalIdController.text = dni;
                           } else if (entidad == 'vehiculo') {
-                            final dominio = decoded['dominio'] ?? 'Dominio no disponible';
+                            final dominio =
+                                decoded['dominio'] ?? 'Dominio no disponible';
                             dominioController.text = dominio;
                           }
                           setState(() {
@@ -1218,7 +1247,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   }
 
   // ==================== ACTION_RESOURCE (para saber si registrar IN/OUT) ====================
-  Future<Map<String, dynamic>> _fetchActionResourceData(String idEntidad) async {
+  Future<Map<String, dynamic>> _fetchActionResourceData(
+      String idEntidad) async {
     try {
       final postData = {
         "id_entidad": idEntidad,
@@ -1256,7 +1286,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     String nombreVal = '';
     String dniVal = (empleado['valor']?.toString().trim() ?? '');
 
-    if (datosString.isNotEmpty && datosString.startsWith('[') && datosString.endsWith(']')) {
+    if (datosString.isNotEmpty &&
+        datosString.startsWith('[') &&
+        datosString.endsWith(']')) {
       try {
         List datosList = jsonDecode(datosString);
         var apellidoMap = datosList.firstWhere(
@@ -1277,8 +1309,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       } catch (_) {}
     }
 
-    final String displayName =
-        (apellidoVal.isEmpty && nombreVal.isEmpty) ? "No disponible" : "$apellidoVal $nombreVal";
+    final String displayName = (apellidoVal.isEmpty && nombreVal.isEmpty)
+        ? "No disponible"
+        : "$apellidoVal $nombreVal";
 
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
@@ -1286,7 +1319,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
 
     // Llamamos a action_resourceData para obtener message + docs_faltantes
     final dataResource = await _fetchActionResourceData(idEntidad);
-    final String actionMessage = dataResource['message']?.toString().trim() ?? '';
+    final String actionMessage =
+        dataResource['message']?.toString().trim() ?? '';
 
     if (actionMessage == "REGISTRAR INGRESO") {
       buttonText = "Registrar Ingreso";
@@ -1330,7 +1364,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                 Image.asset('assets/generic.jpg', width: 80, height: 80),
                 const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                   decoration: BoxDecoration(
                     color: isHabilitado ? Colors.green : Colors.red,
                     borderRadius: BorderRadius.circular(8),
@@ -1394,7 +1429,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cerrar', style: TextStyle(fontFamily: 'Montserrat')),
+              child: const Text('Cerrar',
+                  style: TextStyle(fontFamily: 'Montserrat')),
             ),
             if (showActionButton)
               TextButton(
@@ -1402,7 +1438,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                   Navigator.of(context).pop();
                   _hacerIngresoEgresoEmpleado(empleado);
                 },
-                child: Text(buttonText, style: const TextStyle(fontFamily: 'Montserrat')),
+                child: Text(buttonText,
+                    style: const TextStyle(fontFamily: 'Montserrat')),
               ),
           ],
         );
@@ -1411,7 +1448,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
   }
 
   // ==================== GET / POST (DIO) ====================
-  Future<Response> _makeGetRequest(String url, {Map<String, dynamic>? queryParameters}) async {
+  Future<Response> _makeGetRequest(String url,
+      {Map<String, dynamic>? queryParameters}) async {
     return await dio.get(
       Uri.parse(url).replace(queryParameters: queryParameters).toString(),
       options: Options(
@@ -1424,7 +1462,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
     );
   }
 
-  Future<Response> _makePostRequest(String url, Map<String, dynamic> data) async {
+  Future<Response> _makePostRequest(
+      String url, Map<String, dynamic> data) async {
     return await dio.post(
       url,
       data: jsonEncode(data),
@@ -1445,7 +1484,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: const Text('Próximamente', style: TextStyle(fontFamily: 'Montserrat')),
+          title: const Text('Próximamente',
+              style: TextStyle(fontFamily: 'Montserrat')),
           content: const Text(
             'Esta funcionalidad estará disponible próximamente.',
             style: TextStyle(fontFamily: 'Montserrat'),
@@ -1453,7 +1493,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('OK', style: TextStyle(fontFamily: 'Montserrat')),
+              child:
+                  const Text('OK', style: TextStyle(fontFamily: 'Montserrat')),
             ),
           ],
         );
@@ -1599,12 +1640,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                           const SizedBox(height: 10),
                           DropdownButtonFormField<String>(
                             isExpanded: true,
-                            items: contractorItems.map<DropdownMenuItem<String>>((nombreRazonSocial) {
+                            items: contractorItems
+                                .map<DropdownMenuItem<String>>(
+                                    (nombreRazonSocial) {
                               return DropdownMenuItem<String>(
                                 value: nombreRazonSocial,
                                 child: Text(
                                   nombreRazonSocial,
-                                  style: const TextStyle(fontFamily: 'Montserrat'),
+                                  style:
+                                      const TextStyle(fontFamily: 'Montserrat'),
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 1,
                                 ),
@@ -1622,25 +1666,34 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   filteredEmpleados.clear();
                                 });
 
-                                final contractorLower = value.trim().toLowerCase();
-                                var firstMatch = allProveedoresListarTest.firstWhere(
-                                  (prov) =>
-                                      (prov['nombre_razon_social']?.toString().trim().toLowerCase() ==
-                                       contractorLower),
+                                final contractorLower =
+                                    value.trim().toLowerCase();
+                                var firstMatch =
+                                    allProveedoresListarTest.firstWhere(
+                                  (prov) => (prov['nombre_razon_social']
+                                          ?.toString()
+                                          .trim()
+                                          .toLowerCase() ==
+                                      contractorLower),
                                   orElse: () => null,
                                 );
 
                                 if (firstMatch != null) {
-                                  selectedContractorCuit = firstMatch['cuit'] ?? '';
-                                  selectedContractorTipo = firstMatch['tipo'] ?? '';
-                                  selectedContractorMensajeGeneral = firstMatch['mensaje_general'] ?? '';
-                                  selectedContractorEstado = firstMatch['estado'] ?? '';
+                                  selectedContractorCuit =
+                                      firstMatch['cuit'] ?? '';
+                                  selectedContractorTipo =
+                                      firstMatch['tipo'] ?? '';
+                                  selectedContractorMensajeGeneral =
+                                      firstMatch['mensaje_general'] ?? '';
+                                  selectedContractorEstado =
+                                      firstMatch['estado'] ?? '';
                                   showContractorInfo = true;
                                 }
                               }
                             },
                             decoration: InputDecoration(
-                              contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 10, horizontal: 15),
                               hintText: 'Seleccione Contratista',
                               hintStyle: const TextStyle(
                                 fontFamily: 'Montserrat',
@@ -1681,7 +1734,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                 child: TextField(
                                   controller: personalIdController,
                                   decoration: InputDecoration(
-                                    hintText: 'Número de Identificación Personal',
+                                    hintText:
+                                        'Número de Identificación Personal',
                                     hintStyle: const TextStyle(
                                       fontFamily: 'Montserrat',
                                       color: Colors.grey,
@@ -1702,7 +1756,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: IconButton(
-                                  icon: const Icon(Icons.search, color: Colors.white),
+                                  icon: const Icon(Icons.search,
+                                      color: Colors.white),
                                   onPressed: _buscarPersonalId,
                                 ),
                               ),
@@ -1756,7 +1811,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: IconButton(
-                                  icon: const Icon(Icons.search, color: Colors.white),
+                                  icon: const Icon(Icons.search,
+                                      color: Colors.white),
                                   onPressed: _buscarDominio,
                                 ),
                               ),
@@ -1770,12 +1826,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                               width: double.infinity,
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: resultadoHabilitacion! ? Colors.green[300] : Colors.red[300],
+                                color: resultadoHabilitacion!
+                                    ? Colors.green[300]
+                                    : Colors.red[300],
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Center(
                                 child: Text(
-                                  resultadoHabilitacion! ? 'HABILITADO' : 'INHABILITADO',
+                                  resultadoHabilitacion!
+                                      ? 'HABILITADO'
+                                      : 'INHABILITADO',
                                   style: const TextStyle(
                                     fontFamily: 'Montserrat',
                                     fontSize: 16,
@@ -1793,12 +1853,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   onPressed: _mostrarProximamente,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[300],
-                                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 24, vertical: 12),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: const [
-                                      Icon(Icons.warning, color: Colors.black54),
+                                      Icon(Icons.warning,
+                                          color: Colors.black54),
                                       SizedBox(width: 8),
                                       Text(
                                         'Marcar ingreso con excepción',
@@ -1825,7 +1887,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                               },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF00BCD4),
-                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -1833,7 +1896,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const Icon(Icons.qr_code_scanner, color: Colors.white, size: 24),
+                                  const Icon(Icons.qr_code_scanner,
+                                      color: Colors.white, size: 24),
                                   const SizedBox(width: 8),
                                   Text(
                                     botonQrText,
@@ -1875,7 +1939,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   Container(
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      color: isContratistaHabilitado ? Colors.green[300] : Colors.red[300],
+                                      color: isContratistaHabilitado
+                                          ? Colors.green[300]
+                                          : Colors.red[300],
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Center(
@@ -1902,9 +1968,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                     ),
                                   ),
                                   const SizedBox(height: 8),
-                                  Text('CUIT: ${selectedContractorCuit ?? 'No disponible'}'),
+                                  Text(
+                                      'CUIT: ${selectedContractorCuit ?? 'No disponible'}'),
                                   const Text('Tipo persona: -'),
-                                  Text('Tipo trabajador: ${selectedContractorTipo ?? 'No disponible'}'),
+                                  Text(
+                                      'Tipo trabajador: ${selectedContractorTipo ?? 'No disponible'}'),
                                   const Text('Actividades: -'),
                                 ],
                               ),
@@ -1920,7 +1988,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   onPressed: _filtrarEmpleadosDeContratista,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[200],
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -1941,12 +2010,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   onPressed: _mostrarProximamente,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[200],
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: const [
-                                      Icon(Icons.directions_car, color: Colors.black54),
+                                      Icon(Icons.directions_car,
+                                          color: Colors.black54),
                                       SizedBox(width: 8),
                                       Text(
                                         'Vehículos',
@@ -1966,7 +2037,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                               onPressed: _mostrarProximamente,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.grey[300],
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 24, vertical: 12),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -1988,7 +2060,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                             TextField(
                               controller: searchController,
                               decoration: InputDecoration(
-                                hintText: 'Buscar por Dni, Apellido, Cuit o Cuil',
+                                hintText:
+                                    'Buscar por Dni, Apellido, Cuit o Cuil',
                                 hintStyle: const TextStyle(
                                   fontFamily: 'Montserrat',
                                   color: Colors.grey,
@@ -1997,28 +2070,35 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                 fillColor: Colors.white,
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(color: Colors.grey, width: 1),
+                                  borderSide: const BorderSide(
+                                      color: Colors.grey, width: 1),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(color: Colors.grey, width: 1),
+                                  borderSide: const BorderSide(
+                                      color: Colors.grey, width: 1),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(color: Colors.blue, width: 1),
+                                  borderSide: const BorderSide(
+                                      color: Colors.blue, width: 1),
                                 ),
-                                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                                prefixIcon: const Icon(Icons.search,
+                                    color: Colors.grey),
                               ),
                             ),
                             const SizedBox(height: 20),
                             if (filteredEmpleados.isNotEmpty) ...[
                               for (var empleado in filteredEmpleados)
                                 Builder(builder: (context) {
-                                  final datosString = empleado['datos']?.toString() ?? '';
+                                  final datosString =
+                                      empleado['datos']?.toString() ?? '';
                                   String displayName = 'No disponible';
                                   String apellidoVal = '';
                                   String nombreVal = '';
-                                  String dniVal = (empleado['valor']?.toString().trim() ?? '');
+                                  String dniVal =
+                                      (empleado['valor']?.toString().trim() ??
+                                          '');
 
                                   if (datosString.isNotEmpty &&
                                       datosString.startsWith('[') &&
@@ -2034,17 +2114,26 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                         orElse: () => null,
                                       );
 
-                                      if (apellidoMap != null && apellidoMap['valor'] is String) {
-                                        apellidoVal = (apellidoMap['valor'] as String).trim();
+                                      if (apellidoMap != null &&
+                                          apellidoMap['valor'] is String) {
+                                        apellidoVal =
+                                            (apellidoMap['valor'] as String)
+                                                .trim();
                                       }
-                                      if (nombreMap != null && nombreMap['valor'] is String) {
-                                        nombreVal = (nombreMap['valor'] as String).trim();
+                                      if (nombreMap != null &&
+                                          nombreMap['valor'] is String) {
+                                        nombreVal =
+                                            (nombreMap['valor'] as String)
+                                                .trim();
                                       }
 
-                                      if (apellidoVal.isEmpty && nombreVal.isEmpty) {
+                                      if (apellidoVal.isEmpty &&
+                                          nombreVal.isEmpty) {
                                         displayName = "No disponible";
                                       } else {
-                                        displayName = "$apellidoVal $nombreVal - $dniVal".trim();
+                                        displayName =
+                                            "$apellidoVal $nombreVal - $dniVal"
+                                                .trim();
                                       }
                                     } catch (_) {
                                       displayName = "No disponible";
@@ -2052,9 +2141,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                   }
 
                                   String estado =
-                                      (empleado['estado']?.toString().trim() ?? '').toLowerCase();
-                                  Color textColor =
-                                      estado == 'habilitado' ? Colors.green : Colors.red;
+                                      (empleado['estado']?.toString().trim() ??
+                                              '')
+                                          .toLowerCase();
+                                  Color textColor = estado == 'habilitado'
+                                      ? Colors.green
+                                      : Colors.red;
 
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 8),
@@ -2072,15 +2164,21 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen> with WidgetsBindi
                                           ),
                                         ),
                                         ElevatedButton(
-                                          onPressed: () => _showEmpleadoDetailsModal(empleado),
+                                          onPressed: () =>
+                                              _showEmpleadoDetailsModal(
+                                                  empleado),
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFF43b6ed),
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            backgroundColor:
+                                                const Color(0xFF43b6ed),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 4),
                                             minimumSize: const Size(60, 30),
                                           ),
                                           child: const Text(
                                             'Consultar',
-                                            style: TextStyle(color: Colors.white, fontSize: 12),
+                                            style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12),
                                           ),
                                         ),
                                       ],

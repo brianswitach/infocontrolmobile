@@ -19,8 +19,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   String bearerToken = "";
-  String id_usuarios = ""; // Variable para almacenar el id_usuarios obtenido del login
-  String _language = 'es'; // Solo idioma español
+  String id_usuarios =
+      ""; // Variable para almacenar el id_usuarios obtenido del login
+  // Eliminamos _language si no se usa
   bool _showPendingMessages = false;
   List<Map<String, dynamic>> empresas = [];
   String? empresaNombre;
@@ -44,7 +45,7 @@ class _LoginScreenState extends State<LoginScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
-    // Inicializamos Hive y abrimos la box "id_usuarios2" para guardar el valor
+    // Inicializamos Hive y abrimos la box "id_usuarios2"
     _initHive().then((_) => _openIdUsuariosBox());
   }
 
@@ -125,10 +126,12 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
 
-    String loginUrl = "https://www.infocontrol.tech/web/api/mobile/service/login";
+    String loginUrl =
+        "https://www.infocontrol.tech/web/api/mobile/service/login";
     String username = _usernameController.text.trim();
     String password = _passwordController.text.trim();
-    String basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
+    String basicAuth =
+        'Basic ' + base64Encode(utf8.encode('$username:$password'));
 
     try {
       var connectivityResult = await Connectivity().checkConnectivity();
@@ -139,10 +142,8 @@ class _LoginScreenState extends State<LoginScreen> {
         final storedUser = HiveHelper.getUsernameOffline();
         final storedPass = HiveHelper.getPasswordOffline();
 
-        // Chequeamos si coinciden con las que se ingresaron
-        if (storedUser != null &&
-            storedUser.isNotEmpty &&
-            storedPass != null &&
+        // Quitar "!= null" si el analyzer indica que no puede ser nulo
+        if (storedUser.isNotEmpty &&
             storedPass.isNotEmpty &&
             storedUser == username &&
             storedPass == password) {
@@ -154,7 +155,7 @@ class _LoginScreenState extends State<LoginScreen> {
               context,
               MaterialPageRoute(
                 builder: (context) => HomeScreen(
-                  bearerToken: bearerToken, // Será vacío offline, pero se conserva
+                  bearerToken: bearerToken, // Será vacío offline
                   empresas: localEmpresas,
                   username: username,
                   password: password,
@@ -163,11 +164,13 @@ class _LoginScreenState extends State<LoginScreen> {
             );
           } else {
             // No hay empresas guardadas
-            _showAlertDialog(context, 'No hay conexión y no hay datos locales disponibles.');
+            _showAlertDialog(
+                context, 'No hay conexión y no hay datos locales disponibles.');
           }
         } else {
           // Credenciales incorrectas en modo offline
-          _showAlertDialog(context, 'Credenciales incorrectas en modo offline.');
+          _showAlertDialog(
+              context, 'Credenciales incorrectas en modo offline.');
         }
         return;
       }
@@ -200,7 +203,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // GUARDAR id_usuarios en la box "id_usuarios2"
         await _storeIdUsuariosInBox(id_usuarios);
 
-        // Guardamos las credenciales offline en caso de que quiera usarse sin conexión
+        // Guardamos las credenciales offline
         await HiveHelper.storeUsernameOffline(username);
         await HiveHelper.storePasswordOffline(password);
 
@@ -210,7 +213,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         await sendRequest();
 
-        // Cerrar el dialogo de "Cargando..." antes de navegar
+        // Cerrar el dialogo de "Cargando..."
         Navigator.pop(context);
 
         Navigator.push(
@@ -233,10 +236,12 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       }
-    } on DioException catch (e) {
+    } on DioException catch (_) {
+      // Cambiamos e por _ si no lo usamos
       Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
-    } catch (e) {
+    } catch (_) {
+      // Cambiamos e por _ si no lo usamos
       Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     }
@@ -245,7 +250,6 @@ class _LoginScreenState extends State<LoginScreen> {
   // Método para guardar el id_usuarios en la box "id_usuarios2"
   Future<void> _storeIdUsuariosInBox(String idUsuariosValue) async {
     if (idUsuariosBox == null) {
-      // Si no está abierta la box, la abrimos
       if (!Hive.isBoxOpen('id_usuarios2')) {
         idUsuariosBox = await Hive.openBox('id_usuarios2');
       } else {
@@ -256,7 +260,8 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> sendRequest() async {
-    String listarUrl = "https://www.infocontrol.tech/web/api/mobile/empresas/listar";
+    String listarUrl =
+        "https://www.infocontrol.tech/web/api/mobile/empresas/listar";
 
     try {
       final response = await dio.get(
@@ -278,15 +283,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
         setState(() {
           empresaNombre = empresas.isNotEmpty ? empresas[0]['nombre'] : null;
-          empresaId = empresas.isNotEmpty ? empresas[0]['id_empresa_asociada'] : null;
+          empresaId =
+              empresas.isNotEmpty ? empresas[0]['id_empresa_asociada'] : null;
         });
       } else {
         print('Error en sendRequest: ${response.statusCode}');
       }
-    } on DioException catch (e) {
-      print('Error de conexión en sendRequest: $e');
-    } catch (e) {
-      print('Error inesperado en sendRequest: $e');
+    } on DioException catch (_) {
+      print('Error de conexión en sendRequest');
+    } catch (_) {
+      print('Error inesperado en sendRequest');
     }
   }
 
@@ -311,7 +317,8 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _launchForgotPassword() async {
-    final url = 'https://www.infocontrol.tech/web/usuarios/recuperar_contrasena?lg=arg';
+    final url =
+        'https://www.infocontrol.tech/web/usuarios/recuperar_contrasena?lg=arg';
     await _launchURL(url);
   }
 
@@ -503,7 +510,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     SizedBox(height: 20),
                     Center(
                       child: ElevatedButton(
-                        onPressed: () => _launchURL('https://www.infocontrolweb.com/inteligencia_artificial'),
+                        onPressed: () => _launchURL(
+                            'https://www.infocontrolweb.com/inteligencia_artificial'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Color(0xFF3D77E9),
                           foregroundColor: Colors.white,
