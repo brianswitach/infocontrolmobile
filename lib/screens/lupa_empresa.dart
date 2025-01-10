@@ -1004,6 +1004,43 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     final estado = (vehiculo['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isVehiculoHabilitado = (estado == 'habilitado');
 
+    // -- AQUÍ HACEMOS EL POST A action_resource PARA VEHÍCULO --
+    String vehiculoBtnText = '';
+    bool showVehiculoActionButton = false;
+    try {
+      final Map<String, dynamic> postData = {
+        "id_entidad": vehiculo['id_entidad'],
+        "id_usuarios": hiveIdUsuarios,
+        "tipo_entidad": "vehiculo",
+      };
+
+      final response = await _makePostRequest(
+        "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
+        postData,
+      );
+
+      print(
+          "Codigo de respuesta action_resource vehiculo: ${response.statusCode}");
+      print("Respuesta action_resource vehiculo: ${response.data}");
+
+      // Leemos el "message" dentro de data => (ejemplo: "REGISTRAR INGRESO" o "REGISTRAR EGRESO")
+      final dynamic fullData = response.data;
+      final dynamic dataInside = fullData['data'] ?? {};
+      final String messageFromResource =
+          dataInside['message']?.toString().trim() ?? '';
+
+      if (messageFromResource == "REGISTRAR INGRESO") {
+        vehiculoBtnText = "Registrar Ingreso";
+        showVehiculoActionButton = true;
+      } else if (messageFromResource == "REGISTRAR EGRESO") {
+        vehiculoBtnText = "Registrar Egreso";
+        showVehiculoActionButton = true;
+      }
+    } catch (e) {
+      print("Error al consultar action_resource para vehiculo: $e");
+    }
+    // -- FIN DE LA PARTE AGREGADA --
+
     // Obtenemos dominio (está en "valor")
     final dominio = vehiculo['valor']?.toString().trim() ?? '';
 
@@ -1011,8 +1048,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     final contratistaSeleccionado = selectedContractor ?? 'No disponible';
 
     // NUEVO: revisamos si el contratista está habilitado tomando contractorEstadoFromVehiculos
-    // (antes nos basábamos en selectedContractorEstado, pero ahora
-    //  también tenemos el que viene desde la respuesta de vehiculos)
     final bool isContractorHabilitadoFromVehiculos =
         (contractorEstadoFromVehiculos?.trim().toLowerCase() == 'habilitado');
 
@@ -1079,17 +1114,19 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                   style: TextStyle(fontFamily: 'Montserrat')),
             ),
 
-            // SI EL VEHÍCULO ESTÁ HABILITADO Y EL CONTRATISTA TAMBIÉN => MOSTRAR "Registrar Ingreso"
-            if (isVehiculoHabilitado && isContractorHabilitadoFromVehiculos)
+            // AHORA MOSTRAMOS EL BOTÓN SEGÚN LO QUE DIJO EL action_resource
+            if (showVehiculoActionButton &&
+                isVehiculoHabilitado &&
+                isContractorHabilitadoFromVehiculos)
               TextButton(
                 onPressed: () {
-                  // Aquí podrías implementar la lógica real para registrar el ingreso del vehículo
-                  // Por ahora, uso un placeholder para mostrar un modal "Próximamente"
+                  // Aquí podrías implementar la lógica real
+                  // Por ahora, uso un placeholder para mostrar "Próximamente"
                   _mostrarProximamente();
                 },
-                child: const Text(
-                  'Registrar Ingreso',
-                  style: TextStyle(fontFamily: 'Montserrat'),
+                child: Text(
+                  vehiculoBtnText,
+                  style: const TextStyle(fontFamily: 'Montserrat'),
                 ),
               ),
           ],
@@ -1920,7 +1957,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // DOMINIO/PLACA (con acción en la lupa)
+                          // DOMINIO/Placa
                           const Text(
                             'Dominio/Placa/N° de Serie/N° de Chasis',
                             style: TextStyle(
@@ -1968,7 +2005,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                 child: IconButton(
                                   icon: const Icon(Icons.search,
                                       color: Colors.white),
-                                  onPressed: _buscarDominio, // <--- Lógica
+                                  onPressed: _buscarDominio,
                                 ),
                               ),
                             ],
