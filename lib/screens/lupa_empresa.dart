@@ -16,6 +16,8 @@ import 'login_screen.dart';
 // **IMPORTAMOS HIVE HELPER** (por si usas otros métodos de helper,
 // pero ya no usaremos HiveHelper.getIdUsuarios(),
 // sino que leeremos directamente de la box "id_usuarios2")
+// ignore: unused_import
+import 'hive_helper.dart';
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
@@ -65,7 +67,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   final MobileScannerController controladorCamara = MobileScannerController();
   final TextEditingController personalIdController = TextEditingController();
+
+  // TextEditingController para el front de "Dominio" (con función):
   final TextEditingController dominioController = TextEditingController();
+
   final TextEditingController searchController = TextEditingController();
 
   bool qrScanned = false;
@@ -89,23 +94,21 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   Timer? _refreshTimerLupa;
 
   // ------------ BOXES DE HIVE ------------
-  // Guardaremos empleados en "employees2", contratistas en "contractors2"
-  // y las solicitudes pendientes en "offlineRequests2".
-  Box? employeesBox; // Para almacenar lista de empleados (key: 'all_employees')
-  Box?
-      contractorsBox; // Para almacenar lista de contratistas (key: 'all_contractors')
-  Box?
-      offlineRequestsBox; // Para almacenar solicitudes pendientes offline (key: 'requests')
-  Box? idUsuariosBox; // Para leer id_usuarios desde "id_usuarios2"
+  Box? employeesBox;
+  Box? contractorsBox;
+  Box? offlineRequestsBox;
+  Box? idUsuariosBox;
+
+  // NUEVO: Guardamos temporalmente el estado del contratista desde la consulta a vehiculos
+  // (para saber si está "Habilitado" o "Inhabilitado" según el endpoint de vehiculos)
+  String? contractorEstadoFromVehiculos;
 
   // ==================== CICLO DE VIDA ====================
   @override
   void initState() {
     super.initState();
-    // Observador de ciclo de vida
     WidgetsBinding.instance.addObserver(this);
 
-    // Asignamos token que llega como parámetro
     bearerToken = widget.bearerToken;
 
     cookieJar = CookieJar();
@@ -120,31 +123,23 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       }
     });
 
-    // Iniciamos un timer local para refrescar el token desde LupaEmpresa
     _startTokenRefreshTimerLupa();
-
-    // Escuchamos cambios en el campo de búsqueda (para filtrar empleados)
     searchController.addListener(_filterEmployees);
 
-    // Inicializamos Hive e intentamos abrir las boxes necesarias
     _initHive().then((_) => _openBoxes().then((_) async {
-          // Luego abrimos la box "id_usuarios2" para leer el valor de id_usuarios
           await _openIdUsuariosBox();
-          _readIdUsuariosFromBox(); // Cargamos hiveIdUsuarios
+          _readIdUsuariosFromBox();
 
-          // Chequeamos la conexión
           var connectivityResult = await connectivity.checkConnectivity();
           if (connectivityResult == ConnectivityResult.none) {
-            // SIN CONEXIÓN: Cargamos datos de Hive
+            // SIN CONEXIÓN
             _loadEmployeesFromHive();
             _loadContractorsFromHive();
             setState(() {
               isLoading = false;
             });
-            // Si el scanner estaba configurado para abrir al inicio, lo omitimos
-            // porque no tiene mucho sentido sin conexión.
           } else {
-            // CON CONEXIÓN: Traemos datos de la API y guardamos en Hive
+            // CON CONEXIÓN
             await _fetchAllEmployeesListarTest();
             await _fetchAllProveedoresListar();
             if (widget.openScannerOnInit) {
@@ -158,8 +153,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
-      // Cuando vuelve al primer plano, chequeamos si hay conexión
-      // y refrescamos lista de empleados (similar a lo que teníamos).
       connectivity.checkConnectivity().then((connResult) async {
         if (connResult != ConnectivityResult.none) {
           setState(() {
@@ -188,27 +181,23 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   // ==================== HIVE CONFIG ====================
   Future<void> _initHive() async {
-    // Inicializa Hive en el directorio de documentos de la app
     final Directory appDocDir = await getApplicationDocumentsDirectory();
     Hive.init(appDocDir.path);
   }
 
   Future<void> _openBoxes() async {
-    // Abre (o crea) la box para empleados
     if (!Hive.isBoxOpen('employees2')) {
       employeesBox = await Hive.openBox('employees2');
     } else {
       employeesBox = Hive.box('employees2');
     }
 
-    // Abre (o crea) la box para contratistas
     if (!Hive.isBoxOpen('contractors2')) {
       contractorsBox = await Hive.openBox('contractors2');
     } else {
       contractorsBox = Hive.box('contractors2');
     }
 
-    // Abre (o crea) la box para solicitudes offline
     if (!Hive.isBoxOpen('offlineRequests2')) {
       offlineRequestsBox = await Hive.openBox('offlineRequests2');
     } else {
@@ -216,7 +205,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
   }
 
-  // Abrimos la box "id_usuarios2" para leer id_usuarios
   Future<void> _openIdUsuariosBox() async {
     if (!Hive.isBoxOpen('id_usuarios2')) {
       idUsuariosBox = await Hive.openBox('id_usuarios2');
@@ -225,7 +213,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
   }
 
-  // Leemos el valor guardado en la box "id_usuarios2" (key: 'id_usuarios_key')
   void _readIdUsuariosFromBox() {
     if (idUsuariosBox != null) {
       final storedId = idUsuariosBox?.get('id_usuarios_key', defaultValue: '');
@@ -293,9 +280,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     });
 
     final connectivityResult = await connectivity.checkConnectivity();
-
     if (connectivityResult == ConnectivityResult.none) {
-      // Cargar de Hive
       _loadEmployeesFromHive();
       setState(() {
         isLoading = false;
@@ -315,7 +300,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         List<dynamic> employeesData = responseData['data'] ?? [];
 
         allEmpleadosListarTest = employeesData;
-        // Guardar en Hive
         employeesBox?.put('all_employees', employeesData);
 
         setState(() {
@@ -337,6 +321,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         isLoading = false;
       });
       if (!mounted) return;
+
       if (e.response?.statusCode == 401) {
         Navigator.pushAndRemoveUntil(
           context,
@@ -364,7 +349,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   void _loadEmployeesFromHive() {
-    // Cargamos la lista de empleados desde la box employees2
     List<dynamic> storedEmployees =
         employeesBox?.get('all_employees', defaultValue: []) as List<dynamic>;
     if (storedEmployees.isNotEmpty) {
@@ -388,9 +372,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     });
 
     final connectivityResult = await connectivity.checkConnectivity();
-
     if (connectivityResult == ConnectivityResult.none) {
-      // Cargar de Hive
       _loadContractorsFromHive();
       setState(() {
         isLoading = false;
@@ -410,7 +392,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         List<dynamic> proveedoresData = responseData['data'] ?? [];
 
         allProveedoresListarTest = proveedoresData;
-        // Guardar en Hive
         contractorsBox?.put('all_contractors', proveedoresData);
 
         setState(() {
@@ -432,6 +413,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         isLoading = false;
       });
       if (!mounted) return;
+
       if (e.response?.statusCode == 401) {
         Navigator.pushAndRemoveUntil(
           context,
@@ -459,7 +441,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   void _loadContractorsFromHive() {
-    // Cargamos la lista de contratistas desde la box contractors2
     List<dynamic> storedContractors = contractorsBox
         ?.get('all_contractors', defaultValue: []) as List<dynamic>;
     if (storedContractors.isNotEmpty) {
@@ -502,9 +483,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     });
   }
 
-  // ==================== OFFLINE REQUESTS ====================
+  // ==================== OFFLINE REQUESTS (solo para empleados) ====================
   Future<void> _saveOfflineRequest(String dniIngresado) async {
-    // Obtenemos la lista actual de requests
     List<dynamic> currentRequests =
         offlineRequestsBox?.get('requests', defaultValue: []) as List<dynamic>;
 
@@ -515,15 +495,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       "timestamp": DateTime.now().toIso8601String(),
     };
 
-    // Agregamos la nueva solicitud
     currentRequests.add(pendingData);
-
-    // Guardamos en Hive
     offlineRequestsBox?.put('requests', currentRequests);
   }
 
   Future<void> _processPendingRequests() async {
-    // Obtenemos la lista actual de requests
     List<dynamic> pendingRequests =
         offlineRequestsBox?.get('requests', defaultValue: []) as List<dynamic>;
     if (pendingRequests.isEmpty) return;
@@ -573,26 +549,21 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             );
 
             if ((postResponse.statusCode ?? 0) == 200) {
-              // Se procesó con éxito => no volvemos a agregar este request
+              // Éxito => no se re-agrega
             } else {
-              // No se pudo procesar => lo agregamos a las pendientes
               remainingRequests.add(requestData);
             }
           } else {
-            // No se encontró => lo agregamos de nuevo
             remainingRequests.add(requestData);
           }
         } else {
-          // Respuesta != 200 => reintentamos luego
           remainingRequests.add(requestData);
         }
       } catch (_) {
-        // Error => reintentamos luego
         remainingRequests.add(requestData);
       }
     }
 
-    // Guardamos las requests que faltan procesar
     offlineRequestsBox?.put('requests', remainingRequests);
   }
 
@@ -641,7 +612,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      // Modo offline => guardamos la request
       await _saveOfflineRequest(texto);
       if (!mounted) return;
       showDialog(
@@ -663,7 +633,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       return;
     }
 
-    // Loading...
+    // Loading
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -708,7 +678,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         List<dynamic> employeesData = responseData['data'] ?? [];
 
         final String dniIngresado = texto;
-
         final foundEmployee = employeesData.firstWhere((emp) {
           final val = emp['valor']?.toString().trim() ?? '';
           final cuit = emp['cuit']?.toString().trim() ?? '';
@@ -780,7 +749,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           },
         );
       }
-    } catch (e) {
+    } catch (_) {
       Navigator.pop(context);
       showDialog(
         context: context,
@@ -800,9 +769,337 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
   }
 
-  // ==================== REGISTRAR MOVIMIENTO AL SERVIDOR ====================
+  // ==================== NUEVO: BÚSQUEDA POR DOMINIO/PLACA (con checks de estado) ====================
+  Future<void> _buscarDominio() async {
+    final textoDominio = dominioController.text.trim();
+    if (textoDominio.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Falta información en el campo dominio'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final connectivityResult = await connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Modo offline'),
+            content: const Text('No hay conexión para buscar vehículos.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    // Mostramos un loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Center(
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text(
+                'Cargando...',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 16,
+                  color: Colors.black,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      // 1) Llamamos al endpoint vehiculos
+      final response = await _makeGetRequest(
+        "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
+        queryParameters: {'id_empresas': widget.empresaId},
+      );
+
+      Navigator.pop(context); // Cerramos el loading
+
+      final statusCode = response.statusCode ?? 0;
+      if (statusCode == 200) {
+        final responseData = response.data;
+        final List<dynamic> vehiculosData = responseData['data'] ?? [];
+
+        // 2) Buscamos si el "valor" (DOMINIO) coincide con lo ingresado
+        final foundVehicle = vehiculosData.firstWhere(
+          (veh) {
+            final dom = veh['valor']?.toString().trim().toLowerCase() ?? '';
+            return dom == textoDominio.toLowerCase();
+          },
+          orElse: () => null,
+        );
+
+        // 3) Buscamos si en la misma lista hay un registro con "nombre_razon_social" == selectedContractor
+        //    para saber si ese contratista está habilitado o no
+        if (selectedContractor != null &&
+            selectedContractor!.trim().isNotEmpty) {
+          final foundContractorFromVehiculos = vehiculosData.firstWhere(
+            (veh) {
+              final contractorName = (veh['nombre_razon_social'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              return contractorName ==
+                  selectedContractor!.toString().trim().toLowerCase();
+            },
+            orElse: () => null,
+          );
+          if (foundContractorFromVehiculos != null) {
+            // Guardamos temporalmente el "estado" del contratista desde vehiculos
+            contractorEstadoFromVehiculos =
+                foundContractorFromVehiculos['estado']?.toString().trim();
+          } else {
+            // Si no encontramos un veh con ese nombre_razon_social => lo ponemos inhabilitado (o vacío)
+            contractorEstadoFromVehiculos = 'Inhabilitado';
+          }
+        } else {
+          // No hay contractor seleccionado => lo ponemos inhabilitado por default
+          contractorEstadoFromVehiculos = 'Inhabilitado';
+        }
+
+        // 4) Validamos si "foundVehicle" existe
+        if (foundVehicle != null) {
+          // Revisamos si el dominio coincide con otro contratista
+          final domainContractor =
+              foundVehicle['nombre_razon_social']?.toString().trim() ?? '';
+          if (selectedContractor != null &&
+              selectedContractor!.trim().isNotEmpty) {
+            final selectedContrLower = selectedContractor!.trim().toLowerCase();
+            final domainContrLower = domainContractor.toLowerCase();
+            if (selectedContrLower != domainContrLower) {
+              // => Pertenece a otro contratista
+              showDialog(
+                context: context,
+                builder: (ctx) {
+                  return AlertDialog(
+                    title: const Text('Error'),
+                    content: const Text(
+                        'El dominio que ingresó pertenece a otro contratista.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: const Text('OK'),
+                      ),
+                    ],
+                  );
+                },
+              );
+              return;
+            }
+          }
+          // 5) Si todo va bien, abrimos el modal del vehículo
+          _showVehiculoDetailsModal(foundVehicle);
+        } else {
+          // Dominio no encontrado
+          showDialog(
+            context: context,
+            builder: (ctx) {
+              return AlertDialog(
+                title: const Text('No encontrado'),
+                content: const Text('El dominio no se encuentra registrado.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('OK'),
+                  ),
+                ],
+              );
+            },
+          );
+        }
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Código de respuesta'),
+              content: Text('El código de respuesta es: $statusCode'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
+    } on DioException catch (e) {
+      Navigator.pop(context); // Cerramos el loading si hubo excepción
+      if (e.response?.statusCode == 401) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Token inválido. Vuelva a HomeScreen para recargar.'),
+          ),
+        );
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Error'),
+              content:
+                  const Text('No se pudo procesar la petición de dominio.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
+    } catch (e) {
+      Navigator.pop(context);
+      showDialog(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('Error inesperado'),
+            content: Text('Ocurrió un error: $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
+  // ==================== MOSTRAR DETALLES DEL VEHÍCULO ====================
+  Future<void> _showVehiculoDetailsModal(dynamic vehiculo) async {
+    // Obtenemos estado del vehículo
+    final estado = (vehiculo['estado']?.toString().trim() ?? '').toLowerCase();
+    final bool isVehiculoHabilitado = (estado == 'habilitado');
+
+    // Obtenemos dominio (está en "valor")
+    final dominio = vehiculo['valor']?.toString().trim() ?? '';
+
+    // Contratista seleccionado (si no hay, "No disponible")
+    final contratistaSeleccionado = selectedContractor ?? 'No disponible';
+
+    // NUEVO: revisamos si el contratista está habilitado tomando contractorEstadoFromVehiculos
+    // (antes nos basábamos en selectedContractorEstado, pero ahora
+    //  también tenemos el que viene desde la respuesta de vehiculos)
+    final bool isContractorHabilitadoFromVehiculos =
+        (contractorEstadoFromVehiculos?.trim().toLowerCase() == 'habilitado');
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          content: SingleChildScrollView(
+            child: Column(
+              children: [
+                // Imagen genérica (opcional)
+                Image.asset('assets/generic.jpg', width: 80, height: 80),
+                const SizedBox(height: 16),
+                // Estado del vehículo (verde si habilitado, rojo si inhabilitado)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: isVehiculoHabilitado ? Colors.green : Colors.red,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isVehiculoHabilitado ? 'HABILITADO' : 'INHABILITADO',
+                    style: const TextStyle(
+                      fontFamily: 'Montserrat',
+                      fontSize: 16,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Mostramos dominio y contratista
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Dominio: $dominio',
+                      style: const TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        color: Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Contratista: $contratistaSeleccionado',
+                      style: const TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            // BOTÓN CERRAR: SIEMPRE APARECE
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cerrar',
+                  style: TextStyle(fontFamily: 'Montserrat')),
+            ),
+
+            // SI EL VEHÍCULO ESTÁ HABILITADO Y EL CONTRATISTA TAMBIÉN => MOSTRAR "Registrar Ingreso"
+            if (isVehiculoHabilitado && isContractorHabilitadoFromVehiculos)
+              TextButton(
+                onPressed: () {
+                  // Aquí podrías implementar la lógica real para registrar el ingreso del vehículo
+                  // Por ahora, uso un placeholder para mostrar un modal "Próximamente"
+                  _mostrarProximamente();
+                },
+                child: const Text(
+                  'Registrar Ingreso',
+                  style: TextStyle(fontFamily: 'Montserrat'),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ==================== REGISTRAR MOVIMIENTO AL SERVIDOR (empleado) ====================
   Future<void> _registerMovement(String idEntidad) async {
-    // Loading...
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -836,11 +1133,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     try {
       final Map<String, dynamic> postData = {
         'id_empresas': widget.empresaId,
-        'id_usuarios': hiveIdUsuarios, // Leído de la box id_usuarios2
+        'id_usuarios': hiveIdUsuarios,
         'id_entidad': idEntidad,
       };
 
-      // ------ AÑADIMOS EL PRINT PARA VER EL PARÁMETRO ------
       print("==> REGISTER_MOVEMENT param: $postData");
 
       final postResponse = await _makePostRequest(
@@ -858,6 +1154,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         final String messageToShow =
             dataObject['message'] ?? 'Mensaje no disponible';
 
+        // Marcamos inside/outside
         bool isInside = employeeInsideStatus[idEntidad] ?? false;
         employeeInsideStatus[idEntidad] = !isInside;
 
@@ -898,8 +1195,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       if (e.response?.statusCode == 401) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text(
-                  'Token inválido en POST. Vuelva a HomeScreen para recargar.')),
+            content: Text(
+                'Token inválido en POST. Vuelva a HomeScreen para recargar.'),
+          ),
         );
       } else {
         showDialog(
@@ -946,7 +1244,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       MaterialPageRoute(
         builder: (context) => LupaEmpresaScreen(
           empresa: widget.empresa,
-          bearerToken: bearerToken, // token actualizado
+          bearerToken: bearerToken,
           idEmpresaAsociada: widget.idEmpresaAsociada,
           empresaId: widget.empresaId,
           username: widget.username,
@@ -955,140 +1253,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         ),
       ),
     );
-  }
-
-  // ==================== BÚSQUEDA POR DOMINIO (VEHÍCULOS/MAQUINARIA) ====================
-  Future<void> _buscarDominio() async {
-    final texto = dominioController.text.trim();
-    if (texto.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Falta informacion en el campo'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    final connectivityResult = await connectivity.checkConnectivity();
-    if (connectivityResult == ConnectivityResult.none) {
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Modo offline'),
-            content:
-                const Text('No hay conexión para solicitar datos del dominio.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-      return;
-    }
-
-    // Loading...
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => Center(
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text(
-                'Cargando...',
-                style: TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 16,
-                  color: Colors.black,
-                  decoration: TextDecoration.none,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    try {
-      final response = await _makeGetRequest(
-        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-        queryParameters: {'id_empresas': widget.empresaId},
-      );
-
-      Navigator.pop(context);
-      final statusCode = response.statusCode ?? 0;
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Código de respuesta'),
-            content: Text('El código de respuesta es: $statusCode'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-    } on DioException catch (e) {
-      Navigator.pop(context);
-      if (e.response?.statusCode == 401) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'Token inválido en GET. Vuelva a HomeScreen para recargar.')),
-        );
-      } else {
-        showDialog(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              title: const Text('Recargando...'),
-              content: const Text(''),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('OK'),
-                ),
-              ],
-            );
-          },
-        );
-      }
-    } catch (e) {
-      Navigator.pop(context);
-      showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Recargando...'),
-            content: const Text(''),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-    }
   }
 
   // ==================== FILTRO DE EMPLEADOS CON TEXTFIELD ====================
@@ -1200,10 +1364,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           if (entidad == 'empleado') {
                             final dni = decoded['dni'] ?? 'DNI no disponible';
                             personalIdController.text = dni;
-                          } else if (entidad == 'vehiculo') {
-                            final dominio =
-                                decoded['dominio'] ?? 'Dominio no disponible';
-                            dominioController.text = dominio;
                           }
                           setState(() {
                             qrScanned = true;
@@ -1252,11 +1412,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     try {
       final postData = {
         "id_entidad": idEntidad,
-        "id_usuarios": hiveIdUsuarios, // Leído de box
+        "id_usuarios": hiveIdUsuarios,
         "tipo_entidad": "empleado",
       };
 
-      // ------ AÑADIMOS EL PRINT PARA VER EL PARÁMETRO ------
       print("==> ACTION_RESOURCE param: $postData");
 
       final response = await _makePostRequest(
@@ -1317,7 +1476,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
 
-    // Llamamos a action_resourceData para obtener message + docs_faltantes
     final dataResource = await _fetchActionResourceData(idEntidad);
     final String actionMessage =
         dataResource['message']?.toString().trim() ?? '';
@@ -1328,7 +1486,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       buttonText = "Registrar Egreso";
     }
 
-    // Revisamos si hay docs faltantes en caso de estar inhabilitado
+    // Verificamos si hay docs faltantes
     List<String> missingDocs = [];
     if (!isHabilitado) {
       final motivoConExcepcion = dataResource["motivo_con_excepcion"];
@@ -1348,10 +1506,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
     final missingDocsStr = missingDocs.join(", ");
 
-    // Contratista seleccionado
     final contratistaSeleccionado = selectedContractor ?? 'No disponible';
-
-    // Si el empleado está inhabilitado => Sacar el botón de ingreso/egreso
     bool showActionButton = isHabilitado;
 
     showDialog(
@@ -1765,7 +1920,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // Dominio
+                          // DOMINIO/PLACA (con acción en la lupa)
                           const Text(
                             'Dominio/Placa/N° de Serie/N° de Chasis',
                             style: TextStyle(
@@ -1813,7 +1968,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                 child: IconButton(
                                   icon: const Icon(Icons.search,
                                       color: Colors.white),
-                                  onPressed: _buscarDominio,
+                                  onPressed: _buscarDominio, // <--- Lógica
                                 ),
                               ),
                             ],
