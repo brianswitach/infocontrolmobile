@@ -488,6 +488,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }).toList();
 
     setState(() {
+      // AGREGAMOS ESTO para que se oculte la lista de vehículos (si estuviera abierta)
+      showVehicles = false;
       empleados = filtrados;
       filteredEmpleados = filtrados;
       showEmployees = true;
@@ -1354,12 +1356,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         }));
       });
     } else {
-      // Filtramos solo dentro de los que ya estaban en filteredVehiculos
       List<dynamic> temp = [];
       for (var veh in filteredVehiculos) {
         final dominioVal =
             (veh['valor']?.toString().trim() ?? '').toLowerCase();
-        // puedes agregar más checks si quieres (marca, etc.)
         if (dominioVal.contains(queryVeh)) {
           temp.add(veh);
         }
@@ -2220,7 +2220,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                             children: [
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: _filtrarEmpleadosDeContratista,
+                                  onPressed: () {
+                                    // 1) AL PRESIONAR EMPLEADOS, OCULTAMOS LA LISTA DE VEHÍCULOS
+                                    // Y MOSTRAMOS LA DE EMPLEADOS
+                                    _filtrarEmpleadosDeContratista();
+                                  },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[200],
                                     padding: const EdgeInsets.symmetric(
@@ -2243,6 +2247,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                               Expanded(
                                 child: ElevatedButton(
                                   onPressed: () async {
+                                    // 2) AL PRESIONAR VEHÍCULOS, OCULTAMOS LA LISTA DE EMPLEADOS
+                                    // Y MOSTRAMOS LA DE VEHÍCULOS
+                                    showEmployees = false;
+
                                     if (selectedContractor == null ||
                                         selectedContractor!.isEmpty) {
                                       ScaffoldMessenger.of(context)
@@ -2525,12 +2533,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                             ]
                           ],
 
-                          // LISTA DE VEHICULOS (filtrados por contratista)
+                          // LISTA DE VEHICULOS
                           if (showVehicles) ...[
                             const SizedBox(height: 30),
-
-                            // (1) BORRAMOS EL TÍTULO "Vehículos del contratista seleccionado"
-                            // Y (2) AGREGAMOS EL MISMO FILTRO QUE PARA EMPLEADOS:
                             TextField(
                               controller: searchControllerVeh,
                               decoration: InputDecoration(
@@ -2564,7 +2569,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                               },
                             ),
                             const SizedBox(height: 20),
-
                             if (filteredVehiculos.isNotEmpty) ...[
                               for (var veh in filteredVehiculos)
                                 Builder(builder: (context) {
