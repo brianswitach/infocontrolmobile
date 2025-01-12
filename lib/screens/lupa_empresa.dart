@@ -59,7 +59,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   // Lista de proveedores/contratistas que cargamos desde el nuevo endpoint.
   List<dynamic> allProveedoresListarTest = [];
 
-  // Lista que se mostrará al filtrar por contratista
+  // ** NUEVA LISTA PARA GUARDAR VEHÍCULOS (para cuando se presione el botón "Vehículos") **
+  List<dynamic> allVehiculosListarTest = [];
+
+  // NUEVO: Lista filtrada de vehículos que mostraremos en pantalla
+  List<dynamic> filteredVehiculos = [];
+  bool showVehicles = false; // para saber si mostrar la lista de vehículos
+
+  // Lista que se mostrará al filtrar por contratista (EMPLEADOS)
   List<dynamic> empleados = [];
   List<dynamic> filteredEmpleados = [];
 
@@ -72,6 +79,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   final TextEditingController dominioController = TextEditingController();
 
   final TextEditingController searchController = TextEditingController();
+
+  // NUEVO: Controlador para filtrar VEHÍCULOS (igual al de empleados)
+  final TextEditingController searchControllerVeh = TextEditingController();
 
   bool qrScanned = false;
   bool? resultadoHabilitacion;
@@ -173,6 +183,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     personalIdController.dispose();
     dominioController.dispose();
     searchController.dispose();
+    searchControllerVeh.dispose(); // Agregamos dispose para el nuevo controller
     connectivitySubscription.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimerLupa?.cancel();
@@ -567,7 +578,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     offlineRequestsBox?.put('requests', remainingRequests);
   }
 
-  // ==================== REGISTRAR MOVIMIENTOS (INGRESO/EGRESO) ====================
+  // ==================== REGISTRAR MOVIMIENTOS (INGRESO/EGRESO) (Empleados) ====================
   Future<void> _hacerIngresoEgresoEmpleado(dynamic empleado) async {
     final dniVal = (empleado['valor']?.toString().trim() ?? '');
     final connectivityResult = await connectivity.checkConnectivity();
@@ -835,7 +846,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     );
 
     try {
-      // 1) Llamamos al endpoint vehiculos
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
         queryParameters: {'id_empresas': widget.empresaId},
@@ -848,7 +858,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         final responseData = response.data;
         final List<dynamic> vehiculosData = responseData['data'] ?? [];
 
-        // 2) Buscamos si el "valor" (DOMINIO) coincide con lo ingresado
         final foundVehicle = vehiculosData.firstWhere(
           (veh) {
             final dom = veh['valor']?.toString().trim().toLowerCase() ?? '';
@@ -857,8 +866,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           orElse: () => null,
         );
 
-        // 3) Buscamos si en la misma lista hay un registro con "nombre_razon_social" == selectedContractor
-        //    para saber si ese contratista está habilitado o no
         if (selectedContractor != null &&
             selectedContractor!.trim().isNotEmpty) {
           final foundContractorFromVehiculos = vehiculosData.firstWhere(
@@ -873,21 +880,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             orElse: () => null,
           );
           if (foundContractorFromVehiculos != null) {
-            // Guardamos temporalmente el "estado" del contratista desde vehiculos
             contractorEstadoFromVehiculos =
                 foundContractorFromVehiculos['estado']?.toString().trim();
           } else {
-            // Si no encontramos un veh con ese nombre_razon_social => lo ponemos inhabilitado (o vacío)
             contractorEstadoFromVehiculos = 'Inhabilitado';
           }
         } else {
-          // No hay contractor seleccionado => lo ponemos inhabilitado por default
           contractorEstadoFromVehiculos = 'Inhabilitado';
         }
 
-        // 4) Validamos si "foundVehicle" existe
         if (foundVehicle != null) {
-          // Revisamos si el dominio coincide con otro contratista
           final domainContractor =
               foundVehicle['nombre_razon_social']?.toString().trim() ?? '';
           if (selectedContractor != null &&
@@ -895,7 +897,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             final selectedContrLower = selectedContractor!.trim().toLowerCase();
             final domainContrLower = domainContractor.toLowerCase();
             if (selectedContrLower != domainContrLower) {
-              // => Pertenece a otro contratista
               showDialog(
                 context: context,
                 builder: (ctx) {
@@ -915,10 +916,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               return;
             }
           }
-          // 5) Si todo va bien, abrimos el modal del vehículo
           _showVehiculoDetailsModal(foundVehicle);
         } else {
-          // Dominio no encontrado
           showDialog(
             context: context,
             builder: (ctx) {
@@ -953,7 +952,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         );
       }
     } on DioException catch (e) {
-      Navigator.pop(context); // Cerramos el loading si hubo excepción
+      Navigator.pop(context);
       if (e.response?.statusCode == 401) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1000,11 +999,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   // ==================== MOSTRAR DETALLES DEL VEHÍCULO ====================
   Future<void> _showVehiculoDetailsModal(dynamic vehiculo) async {
-    // Obtenemos estado del vehículo
     final estado = (vehiculo['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isVehiculoHabilitado = (estado == 'habilitado');
 
-    // -- AQUÍ HACEMOS EL POST A action_resource PARA VEHÍCULO --
     String vehiculoBtnText = '';
     bool showVehiculoActionButton = false;
     try {
@@ -1023,7 +1020,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           "Codigo de respuesta action_resource vehiculo: ${response.statusCode}");
       print("Respuesta action_resource vehiculo: ${response.data}");
 
-      // Leemos el "message" dentro de data => (ejemplo: "REGISTRAR INGRESO" o "REGISTRAR EGRESO")
       final dynamic fullData = response.data;
       final dynamic dataInside = fullData['data'] ?? {};
       final String messageFromResource =
@@ -1039,15 +1035,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     } catch (e) {
       print("Error al consultar action_resource para vehiculo: $e");
     }
-    // -- FIN DE LA PARTE AGREGADA --
 
-    // Obtenemos dominio (está en "valor")
     final dominio = vehiculo['valor']?.toString().trim() ?? '';
-
-    // Contratista seleccionado (si no hay, "No disponible")
     final contratistaSeleccionado = selectedContractor ?? 'No disponible';
 
-    // NUEVO: revisamos si el contratista está habilitado tomando contractorEstadoFromVehiculos
     final bool isContractorHabilitadoFromVehiculos =
         (contractorEstadoFromVehiculos?.trim().toLowerCase() == 'habilitado');
 
@@ -1058,10 +1049,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           content: SingleChildScrollView(
             child: Column(
               children: [
-                // Imagen genérica (opcional)
                 Image.asset('assets/generic.jpg', width: 80, height: 80),
                 const SizedBox(height: 16),
-                // Estado del vehículo (verde si habilitado, rojo si inhabilitado)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
@@ -1080,7 +1069,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Mostramos dominio y contratista
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1107,22 +1095,37 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             ),
           ),
           actions: [
-            // BOTÓN CERRAR: SIEMPRE APARECE
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cerrar',
-                  style: TextStyle(fontFamily: 'Montserrat')),
+              child: const Text(
+                'Cerrar',
+                style: TextStyle(fontFamily: 'Montserrat'),
+              ),
             ),
-
-            // AHORA MOSTRAMOS EL BOTÓN SEGÚN LO QUE DIJO EL action_resource
             if (showVehiculoActionButton &&
                 isVehiculoHabilitado &&
                 isContractorHabilitadoFromVehiculos)
               TextButton(
-                onPressed: () {
-                  // Aquí podrías implementar la lógica real
-                  // Por ahora, uso un placeholder para mostrar "Próximamente"
-                  _mostrarProximamente();
+                onPressed: () async {
+                  try {
+                    final Map<String, dynamic> postDataVeh = {
+                      'id_empresas': widget.empresaId,
+                      'id_usuarios': hiveIdUsuarios,
+                      'id_entidad': vehiculo['id_entidad'],
+                    };
+
+                    final postResponseVeh = await _makePostRequest(
+                      "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+                      postDataVeh,
+                    );
+
+                    print(
+                        "Codigo de respuesta register_movement vehiculo: ${postResponseVeh.statusCode}");
+                    print(
+                        "Respuesta register_movement vehiculo: ${postResponseVeh.data}");
+                  } catch (e) {
+                    print("Error al registrar movimiento vehiculo: $e");
+                  }
                 },
                 child: Text(
                   vehiculoBtnText,
@@ -1191,7 +1194,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         final String messageToShow =
             dataObject['message'] ?? 'Mensaje no disponible';
 
-        // Marcamos inside/outside
         bool isInside = employeeInsideStatus[idEntidad] ?? false;
         employeeInsideStatus[idEntidad] = !isInside;
 
@@ -1337,6 +1339,37 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
   }
 
+  // ==================== FILTRO DE VEHÍCULOS CON TEXTFIELD (igual a empleados) ====================
+  void _filterVehicles() {
+    String queryVeh = searchControllerVeh.text.toLowerCase().trim();
+    if (queryVeh.isEmpty) {
+      setState(() {
+        filteredVehiculos = List.from(allVehiculosListarTest.where((veh) {
+          final nombreRazSoc = (veh['nombre_razon_social'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+          return nombreRazSoc ==
+              (selectedContractor ?? '').trim().toLowerCase();
+        }));
+      });
+    } else {
+      // Filtramos solo dentro de los que ya estaban en filteredVehiculos
+      List<dynamic> temp = [];
+      for (var veh in filteredVehiculos) {
+        final dominioVal =
+            (veh['valor']?.toString().trim() ?? '').toLowerCase();
+        // puedes agregar más checks si quieres (marca, etc.)
+        if (dominioVal.contains(queryVeh)) {
+          temp.add(veh);
+        }
+      }
+      setState(() {
+        filteredVehiculos = temp;
+      });
+    }
+  }
+
   // ==================== ESCANEAR DNI ====================
   void _mostrarEscanerQR() {
     showModalBottomSheet(
@@ -1443,7 +1476,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     return sorted;
   }
 
-  // ==================== ACTION_RESOURCE (para saber si registrar IN/OUT) ====================
+  // ==================== ACTION_RESOURCE (para saber si registrar IN/OUT) (Empleados) ====================
   Future<Map<String, dynamic>> _fetchActionResourceData(
       String idEntidad) async {
     try {
@@ -1621,8 +1654,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cerrar',
-                  style: TextStyle(fontFamily: 'Montserrat')),
+              child: const Text(
+                'Cerrar',
+                style: TextStyle(fontFamily: 'Montserrat'),
+              ),
             ),
             if (showActionButton)
               TextButton(
@@ -1630,8 +1665,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                   Navigator.of(context).pop();
                   _hacerIngresoEgresoEmpleado(empleado);
                 },
-                child: Text(buttonText,
-                    style: const TextStyle(fontFamily: 'Montserrat')),
+                child: Text(
+                  buttonText,
+                  style: const TextStyle(fontFamily: 'Montserrat'),
+                ),
               ),
           ],
         );
@@ -1676,8 +1713,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: const Text('Próximamente',
-              style: TextStyle(fontFamily: 'Montserrat')),
+          title: const Text(
+            'Próximamente',
+            style: TextStyle(fontFamily: 'Montserrat'),
+          ),
           content: const Text(
             'Esta funcionalidad estará disponible próximamente.',
             style: TextStyle(fontFamily: 'Montserrat'),
@@ -1685,8 +1724,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child:
-                  const Text('OK', style: TextStyle(fontFamily: 'Montserrat')),
+              child: const Text(
+                'OK',
+                style: TextStyle(fontFamily: 'Montserrat'),
+              ),
             ),
           ],
         );
@@ -1853,9 +1894,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                   selectedContractor = value;
                                   showContractorInfo = false;
                                   showEmployees = false;
+                                  showVehicles = false;
                                   selectedContractorEstado = null;
                                   empleados.clear();
                                   filteredEmpleados.clear();
+                                  filteredVehiculos.clear();
                                 });
 
                                 final contractorLower =
@@ -1901,7 +1944,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // Nro. Identificación
+                          // Nro. Identificación Personal
                           const Text(
                             'Número de Identificación Personal',
                             style: TextStyle(
@@ -2199,7 +2242,99 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                               const SizedBox(width: 8),
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: _mostrarProximamente,
+                                  onPressed: () async {
+                                    if (selectedContractor == null ||
+                                        selectedContractor!.isEmpty) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                              'Debes elegir un contratista'),
+                                          backgroundColor: Colors.red,
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    showDialog(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder: (ctx) => Center(
+                                        child: Container(
+                                          padding: const EdgeInsets.all(20),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: const [
+                                              CircularProgressIndicator(),
+                                              SizedBox(width: 16),
+                                              Text(
+                                                'Cargando...',
+                                                style: TextStyle(
+                                                  fontFamily: 'Montserrat',
+                                                  fontSize: 16,
+                                                  color: Colors.black,
+                                                  decoration:
+                                                      TextDecoration.none,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    );
+
+                                    try {
+                                      final response = await _makeGetRequest(
+                                        "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
+                                        queryParameters: {
+                                          'id_empresas': widget.empresaId
+                                        },
+                                      );
+
+                                      Navigator.pop(context);
+                                      if ((response.statusCode ?? 0) == 200) {
+                                        final responseData = response.data;
+                                        List<dynamic> vehiculosData =
+                                            responseData['data'] ?? [];
+
+                                        allVehiculosListarTest = vehiculosData;
+                                        print("GUARDADA!");
+
+                                        final contractorLower =
+                                            selectedContractor!
+                                                .trim()
+                                                .toLowerCase();
+
+                                        List<dynamic> filtradosVehiculos =
+                                            vehiculosData.where((veh) {
+                                          final nombreRazSoc =
+                                              (veh['nombre_razon_social'] ?? '')
+                                                  .toString()
+                                                  .trim()
+                                                  .toLowerCase();
+                                          return nombreRazSoc ==
+                                              contractorLower;
+                                        }).toList();
+
+                                        setState(() {
+                                          filteredVehiculos =
+                                              filtradosVehiculos;
+                                          showVehicles = true;
+                                        });
+                                      } else {
+                                        print(
+                                            "Error al traer vehiculos: codigo ${response.statusCode}");
+                                      }
+                                    } catch (e) {
+                                      Navigator.pop(context);
+                                      print("Error: $e");
+                                    }
+                                  },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[200],
                                     padding: const EdgeInsets.symmetric(
@@ -2262,18 +2397,18 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                 fillColor: Colors.white,
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(
-                                      color: Colors.grey, width: 1),
+                                  borderSide:
+                                      const BorderSide(color: Colors.grey),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(
-                                      color: Colors.grey, width: 1),
+                                  borderSide:
+                                      const BorderSide(color: Colors.grey),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(
-                                      color: Colors.blue, width: 1),
+                                  borderSide:
+                                      const BorderSide(color: Colors.blue),
                                 ),
                                 prefixIcon: const Icon(Icons.search,
                                     color: Colors.grey),
@@ -2388,7 +2523,111 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                 ),
                               ),
                             ]
-                          ]
+                          ],
+
+                          // LISTA DE VEHICULOS (filtrados por contratista)
+                          if (showVehicles) ...[
+                            const SizedBox(height: 30),
+
+                            // (1) BORRAMOS EL TÍTULO "Vehículos del contratista seleccionado"
+                            // Y (2) AGREGAMOS EL MISMO FILTRO QUE PARA EMPLEADOS:
+                            TextField(
+                              controller: searchControllerVeh,
+                              decoration: InputDecoration(
+                                hintText: 'Buscar por dominio...',
+                                hintStyle: const TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  color: Colors.grey,
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide:
+                                      const BorderSide(color: Colors.grey),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide:
+                                      const BorderSide(color: Colors.grey),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide:
+                                      const BorderSide(color: Colors.blue),
+                                ),
+                                prefixIcon: const Icon(Icons.search,
+                                    color: Colors.grey),
+                              ),
+                              onChanged: (value) {
+                                _filterVehicles();
+                              },
+                            ),
+                            const SizedBox(height: 20),
+
+                            if (filteredVehiculos.isNotEmpty) ...[
+                              for (var veh in filteredVehiculos)
+                                Builder(builder: (context) {
+                                  final dominioVeh =
+                                      (veh['valor']?.toString().trim() ?? '')
+                                          .toUpperCase();
+                                  final estadoVeh =
+                                      (veh['estado']?.toString().trim() ?? '')
+                                          .toLowerCase();
+
+                                  final bool isHabilitado =
+                                      (estadoVeh == 'habilitado');
+                                  final Color textColorVeh =
+                                      isHabilitado ? Colors.green : Colors.red;
+
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            dominioVeh,
+                                            style: TextStyle(
+                                              fontFamily: 'Montserrat',
+                                              fontSize: 16,
+                                              color: textColorVeh,
+                                              decoration: TextDecoration.none,
+                                            ),
+                                          ),
+                                        ),
+                                        ElevatedButton(
+                                          onPressed: () =>
+                                              _showVehiculoDetailsModal(veh),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor:
+                                                const Color(0xFF43b6ed),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 4),
+                                            minimumSize: const Size(60, 30),
+                                          ),
+                                          child: const Text(
+                                            'Consultar',
+                                            style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                })
+                            ] else ...[
+                              const Text(
+                                'No hay vehículos.',
+                                style: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  fontSize: 16,
+                                  color: Colors.black,
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ]
+                          ],
                         ],
                       ),
                     ),
