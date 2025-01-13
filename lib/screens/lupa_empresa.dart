@@ -75,12 +75,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   final MobileScannerController controladorCamara = MobileScannerController();
   final TextEditingController personalIdController = TextEditingController();
 
-  // TextEditingController para el front de "Dominio" (con función):
+  // TextEditingController para el front de "Dominio":
   final TextEditingController dominioController = TextEditingController();
 
   final TextEditingController searchController = TextEditingController();
 
-  // NUEVO: Controlador para filtrar VEHÍCULOS (igual al de empleados)
+  // Controlador para filtrar VEHÍCULOS (igual al de empleados)
   final TextEditingController searchControllerVeh = TextEditingController();
 
   bool qrScanned = false;
@@ -110,7 +110,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   Box? idUsuariosBox;
 
   // NUEVO: Guardamos temporalmente el estado del contratista desde la consulta a vehiculos
-  // (para saber si está "Habilitado" o "Inhabilitado" según el endpoint de vehiculos)
+  // (para saber si está "Habilitado" o "Inhabilitado")
   String? contractorEstadoFromVehiculos;
 
   // ==================== CICLO DE VIDA ====================
@@ -124,6 +124,17 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
+
+    // **AGREGAMOS EL MANEJO AUTOMÁTICO DE COOKIES** (SIN SACAR NADA):
+    cookieJar.saveFromResponse(
+      Uri.parse("https://www.infocontrol.tech"),
+      [
+        Cookie(
+            'ci_session_infocontrolweb1', 'o564sc60v05mhvvdmpbekllq6chtjloq'),
+        Cookie('cookie_sistema', '8433b356c97722102b7f142d8ecf9f8d'),
+      ],
+    );
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
     connectivity = Connectivity();
     connectivitySubscription =
@@ -183,7 +194,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     personalIdController.dispose();
     dominioController.dispose();
     searchController.dispose();
-    searchControllerVeh.dispose(); // Agregamos dispose para el nuevo controller
+    searchControllerVeh.dispose();
     connectivitySubscription.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimerLupa?.cancel();
@@ -488,7 +499,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }).toList();
 
     setState(() {
-      // AGREGAMOS ESTO para que se oculte la lista de vehículos (si estuviera abierta)
+      // Para ocultar la lista de vehículos cuando se selecciona Empleados
       showVehicles = false;
       empleados = filtrados;
       filteredEmpleados = filtrados;
@@ -560,6 +571,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
               postData,
             );
+
+            print('Respuesta register_movement empleado: ${postResponse.data}');
 
             if ((postResponse.statusCode ?? 0) == 200) {
               // Éxito => no se re-agrega
@@ -782,7 +795,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
   }
 
-  // ==================== NUEVO: BÚSQUEDA POR DOMINIO/PLACA (con checks de estado) ====================
+  // ==================== BÚSQUEDA POR DOMINIO/PLACA (con checks) ====================
   Future<void> _buscarDominio() async {
     final textoDominio = dominioController.text.trim();
     if (textoDominio.isEmpty) {
@@ -1004,6 +1017,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     final estado = (vehiculo['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isVehiculoHabilitado = (estado == 'habilitado');
 
+    // A) Hacemos el POST a "action_resource"
     String vehiculoBtnText = '';
     bool showVehiculoActionButton = false;
     try {
@@ -1013,20 +1027,27 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         "tipo_entidad": "vehiculo",
       };
 
-      final response = await _makePostRequest(
+      // Llamamos a la URL:
+      final response = await dio.post(
         "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
-        postData,
+        data: jsonEncode(postData),
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $bearerToken',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+        ),
       );
 
-      print(
-          "Codigo de respuesta action_resource vehiculo: ${response.statusCode}");
-      print("Respuesta action_resource vehiculo: ${response.data}");
-
+      // Parseamos
       final dynamic fullData = response.data;
       final dynamic dataInside = fullData['data'] ?? {};
       final String messageFromResource =
           dataInside['message']?.toString().trim() ?? '';
 
+      // B) Si dice "REGISTRAR INGRESO" => poner button "Registrar Ingreso"
+      //    Si dice "REGISTRAR EGRESO"  => poner button "Registrar Egreso"
       if (messageFromResource == "REGISTRAR INGRESO") {
         vehiculoBtnText = "Registrar Ingreso";
         showVehiculoActionButton = true;
@@ -1041,6 +1062,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     final dominio = vehiculo['valor']?.toString().trim() ?? '';
     final contratistaSeleccionado = selectedContractor ?? 'No disponible';
 
+    // Verificamos si el contratista también está habilitado
     final bool isContractorHabilitadoFromVehiculos =
         (contractorEstadoFromVehiculos?.trim().toLowerCase() == 'habilitado');
 
@@ -1097,6 +1119,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             ),
           ),
           actions: [
+            // Botón de cerrar
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text(
@@ -1104,33 +1127,71 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                 style: TextStyle(fontFamily: 'Montserrat'),
               ),
             ),
+
+            // C) Si "REGISTRAR INGRESO/EGRESO" + si está Habilitado el vehículo
+            //    y su contratista => aparece este botón
             if (showVehiculoActionButton &&
                 isVehiculoHabilitado &&
                 isContractorHabilitadoFromVehiculos)
               TextButton(
                 onPressed: () async {
+                  // D) Llamamos a "/register_movement" para vehículo
                   try {
                     final Map<String, dynamic> postDataVeh = {
                       'id_empresas': widget.empresaId,
-                      'id_usuarios': hiveIdUsuarios,
                       'id_entidad': vehiculo['id_entidad'],
+                      'id_usuarios': hiveIdUsuarios,
                     };
 
-                    final postResponseVeh = await _makePostRequest(
+                    print(
+                        "==> Enviando a /register_movement (vehículo): $postDataVeh");
+
+                    final postResponseVeh = await dio.post(
                       "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
-                      postDataVeh,
+                      data: jsonEncode(postDataVeh),
+                      options: Options(
+                        headers: {
+                          'Authorization': 'Bearer $bearerToken',
+                          'Content-Type': 'application/json',
+                          'Accept': 'application/json',
+                          'Cookie':
+                              'ci_session_infocontrolweb1=o564sc60v05mhvvdmpbekllq6chtjloq; cookie_sistema=8433b356c97722102b7f142d8ecf9f8d',
+                        },
+                      ),
                     );
 
                     print(
-                        "Codigo de respuesta register_movement vehiculo: ${postResponseVeh.statusCode}");
-                    print(
-                        "Respuesta register_movement vehiculo: ${postResponseVeh.data}");
+                        'Respuesta register_movement vehiculo: ${postResponseVeh.data}');
+
+                    if ((postResponseVeh.statusCode ?? 0) == 200) {
+                      final responseData = postResponseVeh.data;
+                      final data = responseData['data'] ?? {};
+                      final String messageToShow =
+                          data['message']?.toString() ??
+                              'Mensaje no disponible';
+
+                      showDialog(
+                        context: context,
+                        builder: (BuildContext context) {
+                          return AlertDialog(
+                            title: const Text('Respuesta Vehículo'),
+                            content: Text(messageToShow),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('OK'),
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                    }
                   } catch (e) {
                     print("Error al registrar movimiento vehiculo: $e");
                   }
                 },
                 child: Text(
-                  vehiculoBtnText,
+                  vehiculoBtnText, // "Registrar Ingreso" o "Registrar Egreso"
                   style: const TextStyle(fontFamily: 'Montserrat'),
                 ),
               ),
@@ -1341,7 +1402,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
   }
 
-  // ==================== FILTRO DE VEHÍCULOS CON TEXTFIELD (igual a empleados) ====================
+  // ==================== FILTRO DE VEHÍCULOS CON TEXTFIELD ====================
   void _filterVehicles() {
     String queryVeh = searchControllerVeh.text.toLowerCase().trim();
     if (queryVeh.isEmpty) {
@@ -1677,6 +1738,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   // ==================== GET / POST (DIO) ====================
+  // Adaptado a FormData (contentType: multipart/form-data)
   Future<Response> _makeGetRequest(String url,
       {Map<String, dynamic>? queryParameters}) async {
     return await dio.get(
@@ -1693,15 +1755,19 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   Future<Response> _makePostRequest(
       String url, Map<String, dynamic> data) async {
+    // Convertimos el map a FormData
+    final formData = FormData.fromMap(data);
+
     return await dio.post(
       url,
-      data: jsonEncode(data),
+      data: formData,
       options: Options(
         headers: {
           'Authorization': 'Bearer $bearerToken',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
+        contentType: 'multipart/form-data', // Importante
       ),
     );
   }
@@ -2221,8 +2287,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                               Expanded(
                                 child: ElevatedButton(
                                   onPressed: () {
-                                    // 1) AL PRESIONAR EMPLEADOS, OCULTAMOS LA LISTA DE VEHÍCULOS
-                                    // Y MOSTRAMOS LA DE EMPLEADOS
                                     _filtrarEmpleadosDeContratista();
                                   },
                                   style: ElevatedButton.styleFrom(
@@ -2247,10 +2311,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                               Expanded(
                                 child: ElevatedButton(
                                   onPressed: () async {
-                                    // 2) AL PRESIONAR VEHÍCULOS, OCULTAMOS LA LISTA DE EMPLEADOS
-                                    // Y MOSTRAMOS LA DE VEHÍCULOS
                                     showEmployees = false;
-
                                     if (selectedContractor == null ||
                                         selectedContractor!.isEmpty) {
                                       ScaffoldMessenger.of(context)
