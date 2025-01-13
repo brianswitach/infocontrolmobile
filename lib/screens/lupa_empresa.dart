@@ -1154,8 +1154,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           'Authorization': 'Bearer $bearerToken',
                           'Content-Type': 'application/json',
                           'Accept': 'application/json',
-                          'Cookie':
-                              'ci_session_infocontrolweb1=o564sc60v05mhvvdmpbekllq6chtjloq; cookie_sistema=8433b356c97722102b7f142d8ecf9f8d',
+                          // Se elimina la línea 'Cookie': '...',
+                          // porque ya se maneja automáticamente con CookieManager
                         },
                       ),
                     );
