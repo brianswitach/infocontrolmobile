@@ -1196,7 +1196,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           content: SingleChildScrollView(
             child: Column(
               children: [
-                Image.asset('assets/generic.jpg', width: 80, height: 80),
+                Image.asset('assets/volante.png', width: 80, height: 80),
                 const SizedBox(height: 16),
                 Container(
                   padding:
