@@ -1020,6 +1020,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     // Lógica para saber si hay que mostrar "Registrar Ingreso" o "Registrar Egreso".
     String vehiculoBtnText = '';
     bool showVehiculoActionButton = false;
+
     try {
       final Map<String, dynamic> postData = {
         "id_entidad": vehiculo['id_entidad'],
@@ -1122,13 +1123,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               ),
             ),
 
-            // Botón de registrar, según corresponda
-            if (showVehiculoActionButton &&
-                isVehiculoHabilitado &&
-                isContractorHabilitadoFromVehiculos)
+            // == AQUÍ SE AGREGA EL BOTÓN EXTRA ==
+            // Botón de registrar (Ingreso/Egreso), según corresponda
+            if (showVehiculoActionButton && isVehiculoHabilitado)
               TextButton(
                 onPressed: () async {
-                  // 1) Hacemos la petición POST
                   try {
                     final Map<String, dynamic> postDataVeh = {
                       'id_empresas': widget.empresaId,
@@ -1148,7 +1147,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                       ),
                     );
 
-                    // 2) Mostramos el resultado en un segundo AlertDialog
+                    // Aquí obtenemos el "message" y lo mostramos en un showDialog
                     if ((postResponseVeh.statusCode ?? 0) == 200) {
                       final responseData = postResponseVeh.data;
                       final data = responseData['data'] ?? {};
@@ -1166,9 +1165,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                             actions: [
                               TextButton(
                                 onPressed: () {
-                                  // 3) Cerramos este segundo AlertDialog...
                                   Navigator.of(ctx2).pop();
-                                  // ... y también cerramos el primer AlertDialog
                                   Navigator.of(context).pop();
                                 },
                                 child: const Text('OK'),
