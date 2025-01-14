@@ -108,6 +108,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   Box? contractorsBox;
   Box? offlineRequestsBox;
   Box? idUsuariosBox;
+  Box? vehiclesBox;
 
   // NUEVO: Guardamos temporalmente el estado del contratista desde la consulta a vehiculos
   // (para saber si está "Habilitado" o "Inhabilitado")
@@ -156,6 +157,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             // SIN CONEXIÓN
             _loadEmployeesFromHive();
             _loadContractorsFromHive();
+            _loadVehiclesFromHive();
             setState(() {
               isLoading = false;
             });
@@ -224,6 +226,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       offlineRequestsBox = await Hive.openBox('offlineRequests2');
     } else {
       offlineRequestsBox = Hive.box('offlineRequests2');
+    }
+
+    if (!Hive.isBoxOpen('vehicles2')) {
+      vehiclesBox = await Hive.openBox('vehicles2');
+    } else {
+      vehiclesBox = Hive.box('vehicles2');
     }
   }
 
@@ -479,6 +487,33 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
   }
 
+  void _loadVehiclesFromHive() {
+    List<dynamic> storedVehicles =
+        vehiclesBox?.get('all_vehicles', defaultValue: []) as List<dynamic>;
+    if (storedVehicles.isNotEmpty) {
+      allVehiculosListarTest = storedVehicles;
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay datos locales de vehículos.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _setLastActionVehicle(String idEntidad, String actionText) {
+    // Guardamos en vehiclesBox bajo la clave "accion_<idEntidad>" la acción
+    vehiclesBox?.put('accion_$idEntidad', actionText);
+  }
+
+  String _getLastActionVehicle(String idEntidad) {
+    // Leemos de vehiclesBox la última acción conocida, o "" si no existe
+    return vehiclesBox?.get('accion_$idEntidad', defaultValue: '') as String;
+  }
+
   // ==================== FILTRO DE EMPLEADOS POR CONTRATISTA ====================
   Future<void> _filtrarEmpleadosDeContratista() async {
     if (selectedContractor == null || selectedContractor!.isEmpty) {
@@ -531,61 +566,108 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     List<dynamic> remainingRequests = [];
 
     for (var requestData in pendingRequests) {
-      final String dniIngresado = requestData["dni"] ?? '';
-      final String idEmpresas = requestData["id_empresas"] ?? '';
-      final String idUsuarios = requestData["id_usuarios"] ?? '';
+      // CASO EMPLEADO (LOGICA EXISTENTE)
+      if (requestData["tipo"] != null && requestData["tipo"] == "empleado") {
+        final String dniIngresado = requestData["dni"] ?? '';
+        final String idEmpresas = requestData["id_empresas"] ?? '';
+        final String idUsuarios = requestData["id_usuarios"] ?? '';
 
-      if (dniIngresado.isEmpty) continue;
+        if (dniIngresado.isEmpty) {
+          continue;
+        }
 
-      try {
-        final response = await _makeGetRequest(
-          "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-          queryParameters: {'id_empresas': idEmpresas},
-        );
+        try {
+          final response = await _makeGetRequest(
+            "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+            queryParameters: {'id_empresas': idEmpresas},
+          );
 
-        final statusCode = response.statusCode ?? 0;
-        if (statusCode == 200) {
-          final responseData = response.data;
-          List<dynamic> employeesData = responseData['data'] ?? [];
+          final statusCode = response.statusCode ?? 0;
+          if (statusCode == 200) {
+            final responseData = response.data;
+            List<dynamic> employeesData = responseData['data'] ?? [];
 
-          final foundEmployee = employeesData.firstWhere((emp) {
-            final val = emp['valor']?.toString().trim() ?? '';
-            final cuit = emp['cuit']?.toString().trim() ?? '';
-            final cuil = emp['cuil']?.toString().trim() ?? '';
-            return (val == dniIngresado ||
-                cuit == dniIngresado ||
-                cuil == dniIngresado);
-          }, orElse: () => null);
+            final foundEmployee = employeesData.firstWhere((emp) {
+              final val = emp['valor']?.toString().trim() ?? '';
+              final cuit = emp['cuit']?.toString().trim() ?? '';
+              final cuil = emp['cuil']?.toString().trim() ?? '';
+              return (val == dniIngresado ||
+                  cuit == dniIngresado ||
+                  cuil == dniIngresado);
+            }, orElse: () => null);
 
-          if (foundEmployee != null) {
-            final String idEntidad =
-                foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
+            if (foundEmployee != null) {
+              final String idEntidad =
+                  foundEmployee['id_entidad'] ?? 'NO DISPONIBLE';
 
-            final Map<String, dynamic> postData = {
-              'id_empresas': idEmpresas,
-              'id_usuarios': idUsuarios,
-              'id_entidad': idEntidad,
-            };
+              final Map<String, dynamic> postData = {
+                'id_empresas': idEmpresas,
+                'id_usuarios': idUsuarios,
+                'id_entidad': idEntidad,
+              };
 
-            final postResponse = await _makePostRequest(
-              "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
-              postData,
-            );
+              final postResponse = await _makePostRequest(
+                "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+                postData,
+              );
 
-            print('Respuesta register_movement empleado: ${postResponse.data}');
+              print(
+                  'Respuesta register_movement empleado: ${postResponse.data}');
 
-            if ((postResponse.statusCode ?? 0) == 200) {
-              // Éxito => no se re-agrega
+              if ((postResponse.statusCode ?? 0) == 200) {
+                // Éxito => no se re-agrega
+              } else {
+                remainingRequests.add(requestData);
+              }
             } else {
               remainingRequests.add(requestData);
             }
           } else {
             remainingRequests.add(requestData);
           }
-        } else {
+        } catch (_) {
           remainingRequests.add(requestData);
         }
-      } catch (_) {
+      }
+
+      // CASO VEHÍCULO (LO NUEVO)
+      else if (requestData["tipo"] != null &&
+          requestData["tipo"] == "vehiculo") {
+        final String? idEntidad = requestData["id_entidad"];
+        final String idEmpresas = requestData["id_empresas"] ?? '';
+        final String idUsuarios = requestData["id_usuarios"] ?? '';
+
+        if (idEntidad == null || idEntidad.isEmpty) {
+          remainingRequests.add(requestData);
+          continue;
+        }
+
+        try {
+          final Map<String, dynamic> postDataVeh = {
+            'id_empresas': idEmpresas,
+            'id_usuarios': idUsuarios,
+            'id_entidad': idEntidad,
+          };
+
+          final postResponseVeh = await _makePostRequest(
+            "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+            postDataVeh,
+          );
+
+          if ((postResponseVeh.statusCode ?? 0) == 200) {
+            print('Movimiento de vehículo registrado con éxito.');
+            // Se registró OK => no se re-agrega
+          } else {
+            // Quedará pendiente
+            remainingRequests.add(requestData);
+          }
+        } catch (_) {
+          remainingRequests.add(requestData);
+        }
+      }
+
+      // SI NO CAE EN EMPLEADO NI VEHÍCULO
+      else {
         remainingRequests.add(requestData);
       }
     }
@@ -620,6 +702,27 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
     await _registerMovement(idEntidad);
+  }
+
+  Future<void> _saveOfflineVehicleRequest(
+      String action, String idEntidad) async {
+    // Recuperamos los requests pendientes que ya hubiera
+    List<dynamic> currentRequests =
+        offlineRequestsBox?.get('requests', defaultValue: []) as List<dynamic>;
+
+    // Creamos el map a guardar
+    final Map<String, dynamic> pendingData = {
+      'tipo': 'vehiculo', // Para diferenciarlo de empleados
+      'action': action, // "Registrar Ingreso" o "Registrar Egreso"
+      'id_empresas': widget.empresaId,
+      'id_usuarios': hiveIdUsuarios,
+      'id_entidad': idEntidad,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+
+    // Lo guardamos en la box
+    currentRequests.add(pendingData);
+    offlineRequestsBox?.put('requests', currentRequests);
   }
 
   // ==================== BÚSQUEDA DE EMPLEADO (DNI/CUIT/CUIL) ====================
@@ -873,6 +976,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         final responseData = response.data;
         final List<dynamic> vehiculosData = responseData['data'] ?? [];
 
+        allVehiculosListarTest = vehiculosData;
+        vehiclesBox?.put('all_vehicles', vehiculosData);
+
         final foundVehicle = vehiculosData.firstWhere(
           (veh) {
             final dom = veh['valor']?.toString().trim().toLowerCase() ?? '';
@@ -1021,39 +1127,61 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     String vehiculoBtnText = '';
     bool showVehiculoActionButton = false;
 
-    try {
-      final Map<String, dynamic> postData = {
-        "id_entidad": vehiculo['id_entidad'],
-        "id_usuarios": hiveIdUsuarios,
-        "tipo_entidad": "vehiculo",
-      };
-
-      final response = await dio.post(
-        "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
-        data: jsonEncode(postData),
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $bearerToken',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
-      );
-
-      final dynamic fullData = response.data;
-      final dynamic dataInside = fullData['data'] ?? {};
-      final String messageFromResource =
-          dataInside['message']?.toString().trim() ?? '';
-
-      if (messageFromResource == "REGISTRAR INGRESO") {
-        vehiculoBtnText = "Registrar Ingreso";
+// Primero chequeamos si hay conexión
+    final connectivityResult = await connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // ESTAMOS OFFLINE => cargamos la última acción conocida (si existe)
+      final lastAction = _getLastActionVehicle(vehiculo['id_entidad']);
+      if (lastAction == 'REGISTRAR INGRESO' ||
+          lastAction == 'REGISTRAR EGRESO') {
+        // Mostramos el botón con la última acción conocida
+        vehiculoBtnText = lastAction;
         showVehiculoActionButton = true;
-      } else if (messageFromResource == "REGISTRAR EGRESO") {
-        vehiculoBtnText = "Registrar Egreso";
+      } else {
+        // Si no había nada guardado, por defecto decimos "Registrar Ingreso"
+        vehiculoBtnText = 'Registrar Ingreso';
         showVehiculoActionButton = true;
       }
-    } catch (e) {
-      print("Error al consultar action_resource para vehiculo: $e");
+    } else {
+      // HAY CONEXIÓN => pedimos la acción al servidor
+      try {
+        final Map<String, dynamic> postData = {
+          'id_entidad': vehiculo['id_entidad'],
+          'id_usuarios': hiveIdUsuarios,
+          'tipo_entidad': 'vehiculo',
+        };
+
+        final response = await dio.post(
+          "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
+          data: jsonEncode(postData),
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer $bearerToken',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+          ),
+        );
+
+        final dynamic fullData = response.data;
+        final dynamic dataInside = fullData['data'] ?? {};
+        final String messageFromResource =
+            dataInside['message']?.toString().trim() ?? '';
+
+        if (messageFromResource.toUpperCase() == "REGISTRAR INGRESO") {
+          vehiculoBtnText = "Registrar Ingreso"; // Fuerzo mayúscula / minúscula
+          showVehiculoActionButton = true;
+          _setLastActionVehicle(vehiculo['id_entidad'], "Registrar Ingreso");
+        } else if (messageFromResource.toUpperCase() == "REGISTRAR EGRESO") {
+          vehiculoBtnText = "Registrar Egreso";
+          showVehiculoActionButton = true;
+          _setLastActionVehicle(vehiculo['id_entidad'], "Registrar Egreso");
+        }
+      } catch (e) {
+        print("Error al consultar action_resource para vehiculo: $e");
+        // Si hay algún error, podrías asignar por defecto "Registrar Ingreso"
+        // o no mostrar el botón, depende de tu preferencia
+      }
     }
 
     final dominio = vehiculo['valor']?.toString().trim() ?? '';
@@ -1128,55 +1256,86 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             if (showVehiculoActionButton && isVehiculoHabilitado)
               TextButton(
                 onPressed: () async {
-                  try {
-                    final Map<String, dynamic> postDataVeh = {
-                      'id_empresas': widget.empresaId,
-                      'id_entidad': vehiculo['id_entidad'],
-                      'id_usuarios': hiveIdUsuarios,
-                    };
+                  final connectivityResult =
+                      await connectivity.checkConnectivity();
 
-                    final postResponseVeh = await dio.post(
-                      "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
-                      data: jsonEncode(postDataVeh),
-                      options: Options(
-                        headers: {
-                          'Authorization': 'Bearer $bearerToken',
-                          'Content-Type': 'application/json',
-                          'Accept': 'application/json',
-                        },
-                      ),
+                  if (connectivityResult == ConnectivityResult.none) {
+                    // OFFLINE => GUARDARLO Y MOSTRAR DIALOG
+                    await _saveOfflineVehicleRequest(
+                        vehiculoBtnText, vehiculo['id_entidad']);
+
+                    // Cerramos el modal actual:
+                    Navigator.of(context).pop();
+
+                    // Mostramos alerta de “se guardó…”
+                    showDialog(
+                      context: context,
+                      builder: (ctx) {
+                        return AlertDialog(
+                          title: const Text('Modo offline'),
+                          content: const Text(
+                              'Se guardó para registrar cuando vuelva la conexión.'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              child: const Text('OK'),
+                            ),
+                          ],
+                        );
+                      },
                     );
+                  } else {
+                    // ONLINE => HACEMOS EL REQUEST REAL
+                    try {
+                      final Map<String, dynamic> postDataVeh = {
+                        'id_empresas': widget.empresaId,
+                        'id_usuarios': hiveIdUsuarios,
+                        'id_entidad': vehiculo['id_entidad'],
+                      };
 
-                    // Aquí obtenemos el "message" y lo mostramos en un showDialog
-                    if ((postResponseVeh.statusCode ?? 0) == 200) {
-                      final responseData = postResponseVeh.data;
-                      final data = responseData['data'] ?? {};
-                      final String messageToShow =
-                          data['message']?.toString() ??
-                              'Mensaje no disponible';
-
-                      if (!mounted) return;
-                      showDialog(
-                        context: context,
-                        builder: (BuildContext ctx2) {
-                          return AlertDialog(
-                            title: const Text('Respuesta Vehículo'),
-                            content: Text(messageToShow),
-                            actions: [
-                              TextButton(
-                                onPressed: () {
-                                  Navigator.of(ctx2).pop();
-                                  Navigator.of(context).pop();
-                                },
-                                child: const Text('OK'),
-                              ),
-                            ],
-                          );
-                        },
+                      final postResponseVeh = await dio.post(
+                        "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+                        data: jsonEncode(postDataVeh),
+                        options: Options(
+                          headers: {
+                            'Authorization': 'Bearer $bearerToken',
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                          },
+                        ),
                       );
+
+                      if ((postResponseVeh.statusCode ?? 0) == 200) {
+                        final responseData = postResponseVeh.data;
+                        final data = responseData['data'] ?? {};
+                        final String messageToShow =
+                            data['message']?.toString() ??
+                                'Mensaje no disponible';
+
+                        // Mostramos la respuesta
+                        if (!mounted) return;
+                        showDialog(
+                          context: context,
+                          builder: (BuildContext ctx2) {
+                            return AlertDialog(
+                              title: const Text('Respuesta Vehículo'),
+                              content: Text(messageToShow),
+                              actions: [
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.of(ctx2).pop();
+                                    Navigator.of(context).pop();
+                                  },
+                                  child: const Text('OK'),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      }
+                    } catch (e) {
+                      print("Error al registrar movimiento vehiculo: $e");
                     }
-                  } catch (e) {
-                    print("Error al registrar movimiento vehiculo: $e");
                   }
                 },
                 child: Text(
@@ -2314,6 +2473,37 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                       return;
                                     }
 
+                                    // 1) Chequeamos conexión
+                                    final connectivityResult =
+                                        await connectivity.checkConnectivity();
+                                    if (connectivityResult ==
+                                        ConnectivityResult.none) {
+                                      // MODO OFFLINE -> Cargamos de Hive
+                                      _loadVehiclesFromHive();
+
+                                      // Filtramos por el contratista seleccionado
+                                      final contractorLower =
+                                          selectedContractor!
+                                              .trim()
+                                              .toLowerCase();
+                                      List<dynamic> filtradosVehiculos =
+                                          allVehiculosListarTest.where((veh) {
+                                        final nombreRazSoc =
+                                            (veh['nombre_razon_social'] ?? '')
+                                                .toString()
+                                                .trim()
+                                                .toLowerCase();
+                                        return nombreRazSoc == contractorLower;
+                                      }).toList();
+
+                                      setState(() {
+                                        filteredVehiculos = filtradosVehiculos;
+                                        showVehicles = true;
+                                      });
+                                      return; // Salimos
+                                    }
+
+                                    // 2) Si HAY conexión, hacemos la petición
                                     showDialog(
                                       context: context,
                                       barrierDismissible: false,
@@ -2353,21 +2543,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                           'id_empresas': widget.empresaId
                                         },
                                       );
-
                                       Navigator.pop(context);
+
                                       if ((response.statusCode ?? 0) == 200) {
                                         final responseData = response.data;
                                         List<dynamic> vehiculosData =
                                             responseData['data'] ?? [];
 
+                                        // GUARDAMOS EN HIVE:
                                         allVehiculosListarTest = vehiculosData;
-                                        print("GUARDADA!");
+                                        vehiclesBox?.put(
+                                            'all_vehicles', vehiculosData);
 
                                         final contractorLower =
                                             selectedContractor!
                                                 .trim()
                                                 .toLowerCase();
-
                                         List<dynamic> filtradosVehiculos =
                                             vehiculosData.where((veh) {
                                           final nombreRazSoc =
