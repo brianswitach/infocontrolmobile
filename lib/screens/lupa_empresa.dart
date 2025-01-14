@@ -1017,7 +1017,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     final estado = (vehiculo['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isVehiculoHabilitado = (estado == 'habilitado');
 
-    // A) Hacemos el POST a "action_resource"
+    // Lógica para saber si hay que mostrar "Registrar Ingreso" o "Registrar Egreso".
     String vehiculoBtnText = '';
     bool showVehiculoActionButton = false;
     try {
@@ -1027,7 +1027,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         "tipo_entidad": "vehiculo",
       };
 
-      // Llamamos a la URL:
       final response = await dio.post(
         "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
         data: jsonEncode(postData),
@@ -1040,14 +1039,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         ),
       );
 
-      // Parseamos
       final dynamic fullData = response.data;
       final dynamic dataInside = fullData['data'] ?? {};
       final String messageFromResource =
           dataInside['message']?.toString().trim() ?? '';
 
-      // B) Si dice "REGISTRAR INGRESO" => poner button "Registrar Ingreso"
-      //    Si dice "REGISTRAR EGRESO"  => poner button "Registrar Egreso"
       if (messageFromResource == "REGISTRAR INGRESO") {
         vehiculoBtnText = "Registrar Ingreso";
         showVehiculoActionButton = true;
@@ -1061,8 +1057,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     final dominio = vehiculo['valor']?.toString().trim() ?? '';
     final contratistaSeleccionado = selectedContractor ?? 'No disponible';
-
-    // Verificamos si el contratista también está habilitado
     final bool isContractorHabilitadoFromVehiculos =
         (contractorEstadoFromVehiculos?.trim().toLowerCase() == 'habilitado');
 
@@ -1119,7 +1113,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             ),
           ),
           actions: [
-            // Botón de cerrar
+            // Botón de cerrar el detalle
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text(
@@ -1128,23 +1122,19 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               ),
             ),
 
-            // C) Si "REGISTRAR INGRESO/EGRESO" + si está Habilitado el vehículo
-            //    y su contratista => aparece este botón
+            // Botón de registrar, según corresponda
             if (showVehiculoActionButton &&
                 isVehiculoHabilitado &&
                 isContractorHabilitadoFromVehiculos)
               TextButton(
                 onPressed: () async {
-                  // D) Llamamos a "/register_movement" para vehículo
+                  // 1) Hacemos la petición POST
                   try {
                     final Map<String, dynamic> postDataVeh = {
                       'id_empresas': widget.empresaId,
                       'id_entidad': vehiculo['id_entidad'],
                       'id_usuarios': hiveIdUsuarios,
                     };
-
-                    print(
-                        "==> Enviando a /register_movement (vehículo): $postDataVeh");
 
                     final postResponseVeh = await dio.post(
                       "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
@@ -1154,15 +1144,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           'Authorization': 'Bearer $bearerToken',
                           'Content-Type': 'application/json',
                           'Accept': 'application/json',
-                          // Se elimina la línea 'Cookie': '...',
-                          // porque ya se maneja automáticamente con CookieManager
                         },
                       ),
                     );
 
-                    print(
-                        'Respuesta register_movement vehiculo: ${postResponseVeh.data}');
-
+                    // 2) Mostramos el resultado en un segundo AlertDialog
                     if ((postResponseVeh.statusCode ?? 0) == 200) {
                       final responseData = postResponseVeh.data;
                       final data = responseData['data'] ?? {};
@@ -1170,15 +1156,21 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           data['message']?.toString() ??
                               'Mensaje no disponible';
 
+                      if (!mounted) return;
                       showDialog(
                         context: context,
-                        builder: (BuildContext context) {
+                        builder: (BuildContext ctx2) {
                           return AlertDialog(
                             title: const Text('Respuesta Vehículo'),
                             content: Text(messageToShow),
                             actions: [
                               TextButton(
-                                onPressed: () => Navigator.of(context).pop(),
+                                onPressed: () {
+                                  // 3) Cerramos este segundo AlertDialog...
+                                  Navigator.of(ctx2).pop();
+                                  // ... y también cerramos el primer AlertDialog
+                                  Navigator.of(context).pop();
+                                },
                                 child: const Text('OK'),
                               ),
                             ],

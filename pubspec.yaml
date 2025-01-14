@@ -74,6 +74,8 @@ flutter:
    - assets/flag_br.png
    - assets/integral_icon.png
    - assets/generic.jpg
+   - assets/volante.png
+   
 
   fonts:
     - family: Montserrat
