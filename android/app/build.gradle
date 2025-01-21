@@ -1,65 +1,99 @@
 plugins {
-   id "com.android.application"
-   id "kotlin-android"
-   id "dev.flutter.flutter-gradle-plugin"
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
 }
 
+// Leemos key.properties
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("key.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { stream ->
+        localProperties.load(stream)
+    }
+} else {
+    println "No se encontró key.properties en la ruta: ${localPropertiesFile}"
+}
+
+// Asignamos las propiedades a variables con nombres únicos
+def storePasswordValue = localProperties.getProperty("storePassword")
+def keyPasswordValue   = localProperties.getProperty("keyPassword")
+def keyAliasValue      = localProperties.getProperty("keyAlias")
+def storeFilePathValue = localProperties.getProperty("storeFile")
+
+println "=== Debug: key.properties ==="
+println "storePasswordValue: ${storePasswordValue}"
+println "keyPasswordValue:   ${keyPasswordValue}"
+println "keyAliasValue:      ${keyAliasValue}"
+println "storeFilePathValue: ${storeFilePathValue}"
+println "============================="
+
 android {
-   namespace = "com.example.infocontrolmobile"
-   compileSdk = 34
-   ndkVersion = flutter.ndkVersion
+    namespace = "com.infocontrol.mobileapp"
+    compileSdk = 34
+    ndkVersion = flutter.ndkVersion
 
-   compileOptions {
-       sourceCompatibility = JavaVersion.VERSION_17
-       targetCompatibility = JavaVersion.VERSION_17
-   }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
 
-   kotlinOptions {
-       jvmTarget = '17'
-   }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
 
-   defaultConfig {
-       applicationId = "com.example.infocontrolmobile"
-       minSdk = 21
-       targetSdk = 34
-       versionCode = flutter.versionCode
-       versionName = flutter.versionName
-       multiDexEnabled true
-   }
+    defaultConfig {
+        applicationId = "com.infocontrol.mobileapp"
+        minSdk = 21
+        targetSdk = 34
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+        multiDexEnabled true
+    }
 
-   buildTypes {
-       release {
-           signingConfig = signingConfigs.debug
-           minifyEnabled true
-           proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-           shrinkResources true
-       }
-   }
+    signingConfigs {
+        release {
+            // Aquí usamos las variables con nombres "Value" para que no haya conflicto
+            storeFile = file(storeFilePathValue)
+            storePassword = storePasswordValue
+            keyAlias = keyAliasValue
+            keyPassword = keyPasswordValue
+        }
+    }
 
-   lint {
-       disable 'InvalidPackage'
-       checkReleaseBuilds false
-   }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
 
-   packagingOptions {
-       exclude 'META-INF/DEPENDENCIES'
-       exclude 'META-INF/LICENSE'
-       exclude 'META-INF/LICENSE.txt'
-       exclude 'META-INF/license.txt'
-       exclude 'META-INF/NOTICE'
-       exclude 'META-INF/NOTICE.txt'
-       exclude 'META-INF/notice.txt'
-       exclude 'META-INF/ASL2.0'
-       exclude("META-INF/*.kotlin_module")
-   }
+    lint {
+        disable 'InvalidPackage'
+        checkReleaseBuilds false
+    }
+
+    packagingOptions {
+        exclude 'META-INF/DEPENDENCIES'
+        exclude 'META-INF/LICENSE'
+        exclude 'META-INF/LICENSE.txt'
+        exclude 'META-INF/license.txt'
+        exclude 'META-INF/NOTICE'
+        exclude 'META-INF/NOTICE.txt'
+        exclude 'META-INF/notice.txt'
+        exclude 'META-INF/ASL2.0'
+        exclude("META-INF/*.kotlin_module")
+    }
 }
 
 dependencies {
-   implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0"
-   implementation 'androidx.core:core-ktx:1.12.0'
-   implementation 'androidx.multidex:multidex:2.0.1'
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0"
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.multidex:multidex:2.0.1'
 }
 
 flutter {
-   source = "../.."
+    source = "../.."
 }

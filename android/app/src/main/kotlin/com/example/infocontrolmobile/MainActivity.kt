@@ -1,4 +1,4 @@
-package com.example.infocontrolmobile
+package com.infocontrol.mobileapp
 
 import io.flutter.embedding.android.FlutterActivity
 
