@@ -1618,51 +1618,79 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               ),
               Expanded(
                 child: MobileScanner(
-                  controller: controladorCamara,
-                  onDetect: (captura) {
-                    final List<Barcode> codigosBarras = captura.barcodes;
-                    if (codigosBarras.isNotEmpty) {
-                      final String codigoLeido =
-                          codigosBarras.first.rawValue ?? '';
-                      Navigator.pop(context);
+                    controller: controladorCamara,
+                    onDetect: (captura) {
+                      final List<Barcode> codigosBarras = captura.barcodes;
+                      if (codigosBarras.isNotEmpty) {
+                        final String codigoLeido =
+                            codigosBarras.first.rawValue ?? '';
+                        Navigator.pop(context);
 
-                      try {
-                        bool isJson = false;
-                        dynamic decoded;
                         try {
-                          decoded = jsonDecode(codigoLeido);
-                          isJson = true;
-                        } catch (_) {
-                          // No es JSON
-                        }
-
-                        if (isJson &&
-                            decoded != null &&
-                            decoded is Map<String, dynamic>) {
-                          final entidad = decoded['entidad'];
-                          if (entidad == 'empleado') {
-                            final dni = decoded['dni'] ?? 'DNI no disponible';
-                            personalIdController.text = dni;
+                          bool isJson = false;
+                          dynamic decoded;
+                          try {
+                            decoded = jsonDecode(codigoLeido);
+                            isJson = true;
+                          } catch (_) {
+                            // No es JSON
                           }
-                          setState(() {
-                            qrScanned = true;
-                          });
-                        } else {
-                          final partes = codigoLeido.split('@');
-                          if (partes.length >= 5) {
-                            final dniParseado = partes[4].trim();
-                            if (dniParseado.isNotEmpty) {
-                              personalIdController.text = dniParseado;
-                              setState(() {
-                                qrScanned = true;
+
+                          if (isJson &&
+                              decoded != null &&
+                              decoded is Map<String, dynamic>) {
+                            final entidad = decoded['entidad'];
+                            // Si el QR indica que es un "empleado"
+                            if (entidad == 'empleado') {
+                              final dni = decoded['dni'] ?? 'DNI no disponible';
+                              personalIdController.text = dni;
+
+                              // Llamamos automáticamente a la búsqueda de empleado
+                              Future.delayed(const Duration(milliseconds: 300),
+                                  () {
+                                _buscarPersonalId();
                               });
                             }
+                            // Si en tu QR manejas la entidad "vehiculo", llamamos a la búsqueda de dominio
+                            else if (entidad == 'vehiculo') {
+                              final dom = decoded['dominio'] ?? '';
+                              dominioController.text = dom;
+
+                              // Llamamos automáticamente a la búsqueda de vehículo
+                              Future.delayed(const Duration(milliseconds: 300),
+                                  () {
+                                _buscarDominio();
+                              });
+                            }
+
+                            setState(() {
+                              qrScanned = true;
+                            });
+                          } else {
+                            // Caso donde no sea un JSON con "entidad", pero sí pueda ser un DNI parseado con '@'
+                            final partes = codigoLeido.split('@');
+                            if (partes.length >= 5) {
+                              final dniParseado = partes[4].trim();
+                              if (dniParseado.isNotEmpty) {
+                                personalIdController.text = dniParseado;
+
+                                // Llamamos automáticamente a la búsqueda de empleado
+                                Future.delayed(
+                                    const Duration(milliseconds: 300), () {
+                                  _buscarPersonalId();
+                                });
+
+                                setState(() {
+                                  qrScanned = true;
+                                });
+                              }
+                            }
                           }
+                        } catch (_) {
+                          // Manejo de error si falló la decodificación
                         }
-                      } catch (_) {}
-                    }
-                  },
-                ),
+                      }
+                    }),
               ),
             ],
           ),
