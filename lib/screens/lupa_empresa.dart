@@ -1185,7 +1185,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
 
     final dominio = vehiculo['valor']?.toString().trim() ?? '';
-    final contratistaSeleccionado = selectedContractor ?? 'No disponible';
+    final contratistaSeleccionado = selectedContractor ?? 'Inhabilitado';
     final bool isContractorHabilitadoFromVehiculos =
         (contractorEstadoFromVehiculos?.trim().toLowerCase() == 'habilitado');
 
@@ -1813,7 +1813,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
     final missingDocsStr = missingDocs.join(", ");
 
-    final contratistaSeleccionado = selectedContractor ?? 'No disponible';
+    final contratistaSeleccionado = selectedContractor ?? 'Inhabilitado';
     bool showActionButton = isHabilitado;
 
     showDialog(
