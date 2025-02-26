@@ -71,6 +71,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   List<dynamic> filteredEmpleados = [];
 
   bool isLoading = true;
+  bool _autoProcessingGelymar = false;
 
   final MobileScannerController controladorCamara = MobileScannerController();
   final TextEditingController personalIdController = TextEditingController();
@@ -147,6 +148,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     _startTokenRefreshTimerLupa();
     searchController.addListener(_filterEmployees);
+    personalIdController.addListener(_autoProcessGelymarURL);
 
     _initHive().then((_) => _openBoxes().then((_) async {
           await _openIdUsuariosBox();
@@ -1618,79 +1620,92 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               ),
               Expanded(
                 child: MobileScanner(
-                    controller: controladorCamara,
-                    onDetect: (captura) {
-                      final List<Barcode> codigosBarras = captura.barcodes;
-                      if (codigosBarras.isNotEmpty) {
-                        final String codigoLeido =
-                            codigosBarras.first.rawValue ?? '';
-                        Navigator.pop(context);
+                  controller: controladorCamara,
+                  onDetect: (captura) {
+                    final List<Barcode> codigosBarras = captura.barcodes;
+                    if (codigosBarras.isNotEmpty) {
+                      final String codigoLeido =
+                          codigosBarras.first.rawValue ?? '';
+                      Navigator.pop(context);
 
+                      // Bloque exclusivo para "Extractos Naturales Gelymar SA."
+                      if (widget.empresa['nombre'] ==
+                              "Extractos Naturales Gelymar SA." &&
+                          codigoLeido.contains("docstatus?RUN=")) {
+                        final uri = Uri.parse(codigoLeido);
+                        final runParam = uri.queryParameters["RUN"];
+                        if (runParam != null) {
+                          final processedRun = runParam.replaceAll('-', '');
+                          personalIdController.text = processedRun;
+                          Future.delayed(const Duration(milliseconds: 300), () {
+                            _buscarPersonalId();
+                          });
+                          setState(() {
+                            qrScanned = true;
+                          });
+                          return;
+                        }
+                      }
+
+                      try {
+                        bool isJson = false;
+                        dynamic decoded;
                         try {
-                          bool isJson = false;
-                          dynamic decoded;
-                          try {
-                            decoded = jsonDecode(codigoLeido);
-                            isJson = true;
-                          } catch (_) {
-                            // No es JSON
+                          decoded = jsonDecode(codigoLeido);
+                          isJson = true;
+                        } catch (_) {
+                          // No es JSON
+                        }
+
+                        if (isJson &&
+                            decoded != null &&
+                            decoded is Map<String, dynamic>) {
+                          final entidad = decoded['entidad'];
+                          // Procesamiento para empleado
+                          if (entidad == 'empleado') {
+                            final dni = decoded['dni'] ?? 'DNI no disponible';
+                            personalIdController.text = dni;
+                            Future.delayed(const Duration(milliseconds: 300),
+                                () {
+                              _buscarPersonalId();
+                            });
+                          }
+                          // Procesamiento para vehículo
+                          else if (entidad == 'vehiculo') {
+                            final dom = decoded['dominio'] ?? '';
+                            dominioController.text = dom;
+                            Future.delayed(const Duration(milliseconds: 300),
+                                () {
+                              _buscarDominio();
+                            });
                           }
 
-                          if (isJson &&
-                              decoded != null &&
-                              decoded is Map<String, dynamic>) {
-                            final entidad = decoded['entidad'];
-                            // Si el QR indica que es un "empleado"
-                            if (entidad == 'empleado') {
-                              final dni = decoded['dni'] ?? 'DNI no disponible';
-                              personalIdController.text = dni;
-
-                              // Llamamos automáticamente a la búsqueda de empleado
+                          setState(() {
+                            qrScanned = true;
+                          });
+                        } else {
+                          // Si no es JSON, intenta separar usando '@'
+                          final partes = codigoLeido.split('@');
+                          if (partes.length >= 5) {
+                            final dniParseado = partes[4].trim();
+                            if (dniParseado.isNotEmpty) {
+                              personalIdController.text = dniParseado;
                               Future.delayed(const Duration(milliseconds: 300),
                                   () {
                                 _buscarPersonalId();
                               });
-                            }
-                            // Si en tu QR manejas la entidad "vehiculo", llamamos a la búsqueda de dominio
-                            else if (entidad == 'vehiculo') {
-                              final dom = decoded['dominio'] ?? '';
-                              dominioController.text = dom;
-
-                              // Llamamos automáticamente a la búsqueda de vehículo
-                              Future.delayed(const Duration(milliseconds: 300),
-                                  () {
-                                _buscarDominio();
+                              setState(() {
+                                qrScanned = true;
                               });
                             }
-
-                            setState(() {
-                              qrScanned = true;
-                            });
-                          } else {
-                            // Caso donde no sea un JSON con "entidad", pero sí pueda ser un DNI parseado con '@'
-                            final partes = codigoLeido.split('@');
-                            if (partes.length >= 5) {
-                              final dniParseado = partes[4].trim();
-                              if (dniParseado.isNotEmpty) {
-                                personalIdController.text = dniParseado;
-
-                                // Llamamos automáticamente a la búsqueda de empleado
-                                Future.delayed(
-                                    const Duration(milliseconds: 300), () {
-                                  _buscarPersonalId();
-                                });
-
-                                setState(() {
-                                  qrScanned = true;
-                                });
-                              }
-                            }
                           }
-                        } catch (_) {
-                          // Manejo de error si falló la decodificación
                         }
+                      } catch (_) {
+                        // Manejo de error en la decodificación
                       }
-                    }),
+                    }
+                  },
+                ),
               ),
             ],
           ),
@@ -2235,11 +2250,34 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                 child: IconButton(
                                   icon: const Icon(Icons.search,
                                       color: Colors.white),
-                                  onPressed: _buscarPersonalId,
+                                  onPressed: () {
+                                    String input =
+                                        personalIdController.text.trim();
+                                    // Si la empresa es "Extractos Naturales Gelymar SA." y el input contiene la URL esperada,
+                                    // extraemos el RUN, le quitamos el guión y actualizamos el campo.
+                                    if (widget.empresa['nombre'] ==
+                                            "Extractos Naturales Gelymar SA." &&
+                                        input.contains(
+                                            "https://portal.sidiv.registrocivil.cl/docstatus?")) {
+                                      Uri? uri = Uri.tryParse(input);
+                                      if (uri != null) {
+                                        String? runParam =
+                                            uri.queryParameters['RUN'];
+                                        if (runParam != null) {
+                                          // Remover el guión del RUN (ejemplo: "12594276-8" → "125942768")
+                                          runParam =
+                                              runParam.replaceAll('-', '');
+                                          personalIdController.text = runParam;
+                                        }
+                                      }
+                                    }
+                                    _buscarPersonalId();
+                                  },
                                 ),
                               ),
                             ],
                           ),
+
                           const SizedBox(height: 20),
 
                           // DOMINIO/Placa
@@ -2918,5 +2956,59 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               ),
             ),
     );
+  }
+
+  void _autoProcessGelymarURL() {
+    // Aplica solo para "Extractos Naturales Gelymar SA."
+    if (widget.empresa['nombre'] == "Extractos Naturales Gelymar SA.") {
+      // Guarda el texto actual del input (el valor escaneado)
+      String input = personalIdController.text.trim();
+      // Verifica si el input contiene "registrocivil.cl" y "RUN="
+      if (input.contains("registrocivil.cl") && input.contains("RUN=")) {
+        Uri? uri = Uri.tryParse(input);
+        if (uri != null) {
+          String? runParam = uri.queryParameters['RUN'];
+          if (runParam != null) {
+            // Quitar el guión del RUN (ejemplo: "12594276-8" → "125942768")
+            runParam = runParam.replaceAll('-', '');
+            // Actualiza el campo solo si es diferente
+            if (personalIdController.text != runParam) {
+              personalIdController.text = runParam;
+              personalIdController.selection = TextSelection.fromPosition(
+                TextPosition(offset: personalIdController.text.length),
+              );
+            }
+            // Si aún no se ha procesado, muestra el diálogo con la respuesta
+            if (!_autoProcessingGelymar) {
+              _autoProcessingGelymar = true;
+              showDialog(
+                context: context,
+                builder: (BuildContext context) {
+                  return AlertDialog(
+                    title: const Text("Respuesta:"),
+                    // Muestra el texto original escaneado (puedes cambiarlo por runParam si prefieres)
+                    content: Text(input),
+                    actions: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          Future.delayed(const Duration(milliseconds: 300), () {
+                            _buscarPersonalId();
+                          });
+                        },
+                        child: const Text("OK"),
+                      ),
+                    ],
+                  );
+                },
+              );
+            }
+          }
+        }
+      } else {
+        // Si no se detecta la URL, resetea la bandera para permitir nuevos disparos
+        _autoProcessingGelymar = false;
+      }
+    }
   }
 }
