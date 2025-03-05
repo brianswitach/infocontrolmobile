@@ -1,14 +1,21 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import './home_screen.dart';
-import 'hive_helper.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+// IMPORTAMOS LA PANTALLA DE HOME
+import './home_screen.dart';
+
+// **IMPORTAMOS HIVE HELPER** (si bien ya no lo usamos para las credenciales, se mantiene para otras funciones)
+import 'hive_helper.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -21,7 +28,6 @@ class _LoginScreenState extends State<LoginScreen> {
   String bearerToken = "";
   String id_usuarios =
       ""; // Variable para almacenar el id_usuarios obtenido del login
-  // Eliminamos _language si no se usa
   bool _showPendingMessages = false;
   List<Map<String, dynamic>> empresas = [];
   String? empresaNombre;
@@ -33,6 +39,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // Box para guardar id_usuarios en "id_usuarios2"
   Box? idUsuariosBox;
+  // Nuevo box para guardar las credenciales
+  late Box credentialsBox;
 
   @override
   void initState() {
@@ -45,8 +53,12 @@ class _LoginScreenState extends State<LoginScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
-    // Inicializamos Hive y abrimos la box "id_usuarios2"
-    _initHive().then((_) => _openIdUsuariosBox());
+    // Inicializamos Hive y abrimos la box "id_usuarios2" y la de credenciales
+    _initHive().then((_) async {
+      await _openIdUsuariosBox();
+      await _openCredentialsBox();
+      _loadSavedCredentials();
+    });
   }
 
   Future<void> _initHive() async {
@@ -62,6 +74,22 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _openCredentialsBox() async {
+    if (!Hive.isBoxOpen('credenciales guardadas')) {
+      credentialsBox = await Hive.openBox('credenciales guardadas');
+    } else {
+      credentialsBox = Hive.box('credenciales guardadas');
+    }
+  }
+
+  void _loadSavedCredentials() {
+    if (credentialsBox.containsKey("username") &&
+        credentialsBox.containsKey("password")) {
+      _usernameController.text = credentialsBox.get("username");
+      _passwordController.text = credentialsBox.get("password");
+    }
+  }
+
   @override
   void dispose() {
     _usernameController.dispose();
@@ -72,7 +100,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _launchURL(String urlString) async {
     final Uri url = Uri.parse(urlString);
-    if (!await launchUrl(url)) {
+    // Usamos la función launch (disponible en versiones anteriores)
+    if (!await launch(url.toString())) {
       throw Exception('Could not launch $url');
     }
   }
@@ -142,7 +171,6 @@ class _LoginScreenState extends State<LoginScreen> {
         final storedUser = HiveHelper.getUsernameOffline();
         final storedPass = HiveHelper.getPasswordOffline();
 
-        // Quitar "!= null" si el analyzer indica que no puede ser nulo
         if (storedUser.isNotEmpty &&
             storedPass.isNotEmpty &&
             storedUser == username &&
@@ -150,7 +178,6 @@ class _LoginScreenState extends State<LoginScreen> {
           // Coinciden: Buscamos empresas locales
           List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
           if (localEmpresas.isNotEmpty) {
-            // Hay datos locales, navegamos
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -163,12 +190,10 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             );
           } else {
-            // No hay empresas guardadas
             _showAlertDialog(
                 context, 'No hay conexión y no hay datos locales disponibles.');
           }
         } else {
-          // Credenciales incorrectas en modo offline
           _showAlertDialog(
               context, 'Credenciales incorrectas en modo offline.');
         }
@@ -203,9 +228,11 @@ class _LoginScreenState extends State<LoginScreen> {
         // GUARDAR id_usuarios en la box "id_usuarios2"
         await _storeIdUsuariosInBox(id_usuarios);
 
-        // Guardamos las credenciales offline
-        await HiveHelper.storeUsernameOffline(username);
-        await HiveHelper.storePasswordOffline(password);
+        // Si el checkbox de "Recordar datos" está activo, guardamos las credenciales
+        if (_showPendingMessages) {
+          await credentialsBox.put("username", username);
+          await credentialsBox.put("password", password);
+        }
 
         setState(() {
           _showPendingMessages = true;
@@ -213,7 +240,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
         await sendRequest();
 
-        // Cerrar el dialogo de "Cargando..."
         Navigator.pop(context);
 
         Navigator.push(
@@ -228,26 +254,21 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       } else if (statusCode == 404) {
-        // Cerrar el diálogo de "Cargando..."
         Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       } else {
-        // Cerrar el diálogo de "Cargando..."
         Navigator.pop(context);
         _showAlertDialog(context, 'Usuario o Contraseña incorrectos');
       }
     } on DioException catch (_) {
-      // Cambiamos e por _ si no lo usamos
       Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     } catch (_) {
-      // Cambiamos e por _ si no lo usamos
       Navigator.pop(context);
       _showAlertDialog(context, 'Error de conexión en login');
     }
   }
 
-  // Método para guardar el id_usuarios en la box "id_usuarios2"
   Future<void> _storeIdUsuariosInBox(String idUsuariosValue) async {
     if (idUsuariosBox == null) {
       if (!Hive.isBoxOpen('id_usuarios2')) {
@@ -278,7 +299,6 @@ class _LoginScreenState extends State<LoginScreen> {
         final responseData = response.data;
         empresas = List<Map<String, dynamic>>.from(responseData['data']);
 
-        // Guardamos empresas en Hive
         await HiveHelper.insertEmpresas(empresas);
 
         setState(() {
@@ -346,7 +366,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   width: 165,
                 ),
               ),
-
               // CARD de LOGIN
               Container(
                 width: MediaQuery.of(context).size.width * 0.85,
@@ -477,7 +496,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
               ),
-
               // Sección inferior
               SizedBox(height: 20),
               Container(

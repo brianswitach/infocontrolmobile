@@ -1230,14 +1230,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      'Contratista: $contratistaSeleccionado',
-                      style: const TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontSize: 14,
-                        color: Colors.black,
-                      ),
-                    ),
                   ],
                 ),
               ],
@@ -1629,21 +1621,23 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                       Navigator.pop(context);
 
                       // Bloque exclusivo para "Extractos Naturales Gelymar SA."
-                      if (widget.empresa['nombre'] ==
-                              "Extractos Naturales Gelymar SA." &&
-                          codigoLeido.contains("docstatus?RUN=")) {
-                        final uri = Uri.parse(codigoLeido);
-                        final runParam = uri.queryParameters["RUN"];
-                        if (runParam != null) {
-                          final processedRun = runParam.replaceAll('-', '');
-                          personalIdController.text = processedRun;
-                          Future.delayed(const Duration(milliseconds: 300), () {
-                            _buscarPersonalId();
-                          });
-                          setState(() {
-                            qrScanned = true;
-                          });
-                          return;
+                      if (codigoLeido.contains("registrocivil.cl") &&
+                          codigoLeido.contains("RUN=")) {
+                        Uri? uri = Uri.tryParse(codigoLeido);
+                        if (uri != null) {
+                          String? runParam = uri.queryParameters["RUN"];
+                          if (runParam != null) {
+                            final processedRun = runParam.replaceAll('-', '');
+                            personalIdController.text = processedRun;
+                            Future.delayed(const Duration(milliseconds: 300),
+                                () {
+                              _buscarPersonalId();
+                            });
+                            setState(() {
+                              qrScanned = true;
+                            });
+                            return;
+                          }
                         }
                       }
 
@@ -1872,15 +1866,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                     const SizedBox(height: 8),
                     Text(
                       'Dni: $dniVal',
-                      style: const TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontSize: 14,
-                        color: Colors.black,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Contratista: $contratistaSeleccionado',
                       style: const TextStyle(
                         fontFamily: 'Montserrat',
                         fontSize: 14,
@@ -2251,6 +2236,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                   icon: const Icon(Icons.search,
                                       color: Colors.white),
                                   onPressed: () {
+                                    // Verificar si se ha elegido un contratista
                                     String input =
                                         personalIdController.text.trim();
                                     // Si la empresa es "Extractos Naturales Gelymar SA." y el input contiene la URL esperada,
@@ -2264,7 +2250,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                         String? runParam =
                                             uri.queryParameters['RUN'];
                                         if (runParam != null) {
-                                          // Remover el guión del RUN (ejemplo: "12594276-8" → "125942768")
                                           runParam =
                                               runParam.replaceAll('-', '');
                                           personalIdController.text = runParam;
@@ -2959,56 +2944,53 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   void _autoProcessGelymarURL() {
-    // Aplica solo para "Extractos Naturales Gelymar SA."
-    if (widget.empresa['nombre'] == "Extractos Naturales Gelymar SA.") {
-      // Guarda el texto actual del input (el valor escaneado)
-      String input = personalIdController.text.trim();
-      // Verifica si el input contiene "registrocivil.cl" y "RUN="
-      if (input.contains("registrocivil.cl") && input.contains("RUN=")) {
-        Uri? uri = Uri.tryParse(input);
-        if (uri != null) {
-          String? runParam = uri.queryParameters['RUN'];
-          if (runParam != null) {
-            // Quitar el guión del RUN (ejemplo: "12594276-8" → "125942768")
-            runParam = runParam.replaceAll('-', '');
-            // Actualiza el campo solo si es diferente
-            if (personalIdController.text != runParam) {
-              personalIdController.text = runParam;
-              personalIdController.selection = TextSelection.fromPosition(
-                TextPosition(offset: personalIdController.text.length),
-              );
-            }
-            // Si aún no se ha procesado, muestra el diálogo con la respuesta
-            if (!_autoProcessingGelymar) {
-              _autoProcessingGelymar = true;
-              showDialog(
-                context: context,
-                builder: (BuildContext context) {
-                  return AlertDialog(
-                    title: const Text("Respuesta:"),
-                    // Muestra el texto original escaneado (puedes cambiarlo por runParam si prefieres)
-                    content: Text(input),
-                    actions: [
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                          Future.delayed(const Duration(milliseconds: 300), () {
-                            _buscarPersonalId();
-                          });
-                        },
-                        child: const Text("OK"),
-                      ),
-                    ],
-                  );
-                },
-              );
-            }
+    // Ahora se aplica para TODAS las empresas.
+    String input = personalIdController.text.trim();
+    // Verifica si el input contiene "registrocivil.cl" y "RUN="
+    if (input.contains("registrocivil.cl") && input.contains("RUN=")) {
+      Uri? uri = Uri.tryParse(input);
+      if (uri != null) {
+        String? runParam = uri.queryParameters['RUN'];
+        if (runParam != null) {
+          // Quitar el guión del RUN (por ejemplo: "12594276-8" → "125942768")
+          runParam = runParam.replaceAll('-', '');
+          // Actualiza el campo solo si es diferente
+          if (personalIdController.text != runParam) {
+            personalIdController.text = runParam;
+            personalIdController.selection = TextSelection.fromPosition(
+              TextPosition(offset: personalIdController.text.length),
+            );
+          }
+          // Si aún no se ha procesado, muestra el diálogo con la respuesta
+          if (!_autoProcessingGelymar) {
+            _autoProcessingGelymar = true;
+            showDialog(
+              context: context,
+              builder: (BuildContext context) {
+                return AlertDialog(
+                  // title: const Text("Respuesta:"),
+                  // Muestra el texto original escaneado (puedes cambiarlo por runParam si prefieres)
+                  content: Text(input),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        Future.delayed(const Duration(milliseconds: 300), () {
+                          _buscarPersonalId();
+                        });
+                      },
+                      child: const Text("OK"),
+                    ),
+                  ],
+                );
+              },
+            );
           }
         }
-      } else {
-        // Si no se detecta la URL, resetea la bandera para permitir nuevos disparos
-        _autoProcessingGelymar = false;
       }
+    } else {
+      // Si no se detecta la URL, resetea la bandera para permitir nuevos disparos
+      _autoProcessingGelymar = false;
     }
   }
 }
