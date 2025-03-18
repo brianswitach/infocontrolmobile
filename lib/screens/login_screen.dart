@@ -25,6 +25,8 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  bool _passwordVisible =
+      false; // Variable para controlar la visibilidad de la contraseña
   String bearerToken = "";
   String id_usuarios =
       ""; // Variable para almacenar el id_usuarios obtenido del login
@@ -431,8 +433,21 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderSide: BorderSide.none,
                         ),
                         prefixIcon: Icon(Icons.lock, color: Colors.black54),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _passwordVisible
+                                ? Icons.visibility
+                                : Icons.visibility_off,
+                            color: Colors.black54,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _passwordVisible = !_passwordVisible;
+                            });
+                          },
+                        ),
                       ),
-                      obscureText: true,
+                      obscureText: !_passwordVisible,
                     ),
                     SizedBox(height: 16),
                     Row(

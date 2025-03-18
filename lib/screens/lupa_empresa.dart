@@ -50,6 +50,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   String? selectedContractorTipo;
   String? selectedContractorMensajeGeneral;
   String? selectedContractorEstado;
+  String? selectedContractorId;
   bool showContractorInfo = false;
   bool showEmployees = false;
 
@@ -323,8 +324,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     try {
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-        queryParameters: {'id_empresas': widget.empresaId},
+        queryParameters: {
+          'id_empresas': widget.empresaId,
+          'id_proveedores': selectedContractorId ?? ''
+        },
       );
+
       final statusCode = response.statusCode ?? 0;
 
       if (statusCode == 200) {
@@ -425,6 +430,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
         allProveedoresListarTest = proveedoresData;
         contractorsBox?.put('all_contractors', proveedoresData);
+
+        // **NUEVO**: Extraer y guardar los id_proveedores
+        List<dynamic> idProveedoresList =
+            proveedoresData.map((item) => item['id_proveedores']).toList();
+        contractorsBox?.put('id_proveedores_list', idProveedoresList);
 
         setState(() {
           isLoading = false;
@@ -581,7 +591,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         try {
           final response = await _makeGetRequest(
             "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-            queryParameters: {'id_empresas': idEmpresas},
+            queryParameters: {
+              'id_empresas': widget.empresaId,
+              'id_proveedores': selectedContractorId ?? ''
+            },
           );
 
           final statusCode = response.statusCode ?? 0;
@@ -798,7 +811,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     try {
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-        queryParameters: {'id_empresas': widget.empresaId},
+        queryParameters: {
+          'id_empresas': widget.empresaId,
+          'id_proveedores': selectedContractorId ?? ''
+        },
       );
 
       Navigator.pop(context);
@@ -968,7 +984,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     try {
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
-        queryParameters: {'id_empresas': widget.empresaId},
+        queryParameters: {
+          'id_empresas': widget.empresaId,
+          'id_proveedores': selectedContractorId ?? ''
+        },
       );
 
       Navigator.pop(context); // Cerramos el loading
@@ -980,6 +999,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
         allVehiculosListarTest = vehiculosData;
         vehiclesBox?.put('all_vehicles', vehiculosData);
+
+        List<dynamic> numeroSerieList =
+            vehiculosData.map((item) => item['numero_serie']).toList();
+        vehiclesBox?.put('numero_serie_list', numeroSerieList);
 
         final foundVehicle = vehiculosData.firstWhere(
           (veh) {
@@ -1125,11 +1148,22 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     final estado = (vehiculo['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isVehiculoHabilitado = (estado == 'habilitado');
 
+    // 1) Verificamos si el campo "valor" (dominio) está vacío o no
+    final String dominio = vehiculo['valor']?.toString().trim() ?? '';
+    // 2) Obtenemos el número de serie
+    final String numeroSerie =
+        vehiculo['numero_serie']?.toString().trim() ?? '';
+
+    // 3) Creamos una variable que muestre "Dominio: XXX" si dominio NO está vacío
+    //    o "Número de serie: XXX" si dominio está vacío.
+    final String textoDominioOSerie =
+        dominio.isEmpty ? 'Número de serie: $numeroSerie' : 'Dominio: $dominio';
+
     // Lógica para saber si hay que mostrar "Registrar Ingreso" o "Registrar Egreso".
     String vehiculoBtnText = '';
     bool showVehiculoActionButton = false;
 
-// Primero chequeamos si hay conexión
+    // Primero chequeamos si hay conexión
     final connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       // ESTAMOS OFFLINE => cargamos la última acción conocida (si existe)
@@ -1171,7 +1205,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             dataInside['message']?.toString().trim() ?? '';
 
         if (messageFromResource.toUpperCase() == "REGISTRAR INGRESO") {
-          vehiculoBtnText = "Registrar Ingreso"; // Fuerzo mayúscula / minúscula
+          vehiculoBtnText = "Registrar Ingreso";
           showVehiculoActionButton = true;
           _setLastActionVehicle(vehiculo['id_entidad'], "Registrar Ingreso");
         } else if (messageFromResource.toUpperCase() == "REGISTRAR EGRESO") {
@@ -1185,11 +1219,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         // o no mostrar el botón, depende de tu preferencia
       }
     }
-
-    final dominio = vehiculo['valor']?.toString().trim() ?? '';
-    final contratistaSeleccionado = selectedContractor ?? 'Inhabilitado';
-    final bool isContractorHabilitadoFromVehiculos =
-        (contractorEstadoFromVehiculos?.trim().toLowerCase() == 'habilitado');
 
     showDialog(
       context: context,
@@ -1221,8 +1250,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Aquí reemplazamos "Dominio: $dominio" por la nueva variable "textoDominioOSerie"
                     Text(
-                      'Dominio: $dominio',
+                      textoDominioOSerie,
                       style: const TextStyle(
                         fontFamily: 'Montserrat',
                         fontSize: 14,
@@ -2164,6 +2194,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                       firstMatch['mensaje_general'] ?? '';
                                   selectedContractorEstado =
                                       firstMatch['estado'] ?? '';
+                                  // NUEVO: Guardamos el id_proveedores
+                                  selectedContractorId =
+                                      firstMatch['id_proveedores'] ?? '';
                                   showContractorInfo = true;
                                 }
                               }
@@ -2591,7 +2624,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                       final response = await _makeGetRequest(
                                         "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
                                         queryParameters: {
-                                          'id_empresas': widget.empresaId
+                                          'id_empresas': widget.empresaId,
+                                          'id_proveedores':
+                                              selectedContractorId ?? ''
                                         },
                                       );
                                       Navigator.pop(context);
@@ -2864,9 +2899,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                             if (filteredVehiculos.isNotEmpty) ...[
                               for (var veh in filteredVehiculos)
                                 Builder(builder: (context) {
-                                  final dominioVeh =
-                                      (veh['valor']?.toString().trim() ?? '')
+                                  final rawValor =
+                                      veh['valor']?.toString().trim() ?? '';
+                                  final dominioVeh = rawValor.isNotEmpty
+                                      ? rawValor.toUpperCase()
+                                      : (veh['numero_serie']
+                                                  ?.toString()
+                                                  .trim() ??
+                                              '')
                                           .toUpperCase();
+
                                   final estadoVeh =
                                       (veh['estado']?.toString().trim() ?? '')
                                           .toLowerCase();
