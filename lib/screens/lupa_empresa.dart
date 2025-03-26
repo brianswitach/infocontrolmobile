@@ -1650,6 +1650,29 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           codigosBarras.first.rawValue ?? '';
                       Navigator.pop(context);
 
+                      // --- NUEVO: Bloque para detectar el DNI mexicano ---
+                      if (codigoLeido.contains("qr.ine.mx")) {
+                        final Uri? uri = Uri.tryParse(codigoLeido);
+                        if (uri != null &&
+                            uri.host == 'qr.ine.mx' &&
+                            uri.pathSegments.isNotEmpty) {
+                          final String numericSegment = uri.pathSegments.first;
+                          String idMexicano = numericSegment
+                              .substring(numericSegment.length - 10);
+                          if (idMexicano.startsWith('0')) {
+                            idMexicano = idMexicano.substring(1);
+                          }
+                          personalIdController.text = idMexicano;
+                          Future.delayed(const Duration(milliseconds: 300), () {
+                            _buscarPersonalId();
+                          });
+                          setState(() {
+                            qrScanned = true;
+                          });
+                          return;
+                        }
+                      }
+
                       // Bloque exclusivo para "Extractos Naturales Gelymar SA."
                       if (codigoLeido.contains("registrocivil.cl") &&
                           codigoLeido.contains("RUN=")) {
