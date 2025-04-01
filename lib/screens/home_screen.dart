@@ -6,10 +6,14 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
-import 'package:hive/hive.dart'; // <--- Import necesario para usar Hive localmente
+import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
+
+// IMPORTAMOS LOGIN_SCREEN PARA PODER DESLOGUEAR
+import 'login_screen.dart';
+
 import './lupa_empresa.dart';
 import 'hive_helper.dart';
-import 'package:path_provider/path_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
@@ -29,7 +33,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Eliminamos _showPendingMessages (unused_field) si ya no se usa
   late String bearerToken;
   Timer? _refreshTimer;
   List<Map<String, dynamic>> empresas = [];
@@ -169,7 +172,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ---------------------------------------------
-  // RUTINA PARA REFRESCAR TOKEN
+  // RUTINA PARA REFRESCAR TOKEN CON REINTENTOS
   // ---------------------------------------------
   void _startTokenRefreshTimer() {
     _refreshTimer?.cancel();
@@ -179,7 +182,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Lógica de refresco del token usando username y password
   Future<void> _refreshBearerToken() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -187,45 +189,72 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    try {
-      final response = await dio.post(
-        "https://www.infocontrol.tech/web/api/mobile/service/login",
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization':
-                'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
-          },
-        ),
-        data: jsonEncode({
-          'username': widget.username,
-          'password': widget.password,
-        }),
-      );
+    const int maxAttempts = 3;
+    int attempt = 0;
+    bool success = false;
 
-      if (response.statusCode == 200) {
-        final loginData = response.data;
-        // Si no puede ser nulo, quitamos ?? ''
-        String newToken = (loginData['data']['Bearer']).toString();
+    while (attempt < maxAttempts && !success) {
+      try {
+        final response = await dio.post(
+          "https://www.infocontrol.tech/web/api/mobile/service/login",
+          options: Options(
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization':
+                  'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
+            },
+          ),
+          data: jsonEncode({
+            'username': widget.username,
+            'password': widget.password,
+          }),
+        );
 
-        if (mounted) {
-          setState(() {
-            bearerToken = newToken;
-          });
+        if (response.statusCode == 200) {
+          final loginData = response.data;
+          String newToken = (loginData['data']['Bearer']).toString();
+
+          if (mounted) {
+            setState(() {
+              bearerToken = newToken;
+            });
+          }
+
+          // Guardamos el nuevo token en Hive (para offline)
+          await HiveHelper.storeBearerToken(newToken);
+
+          // Volvemos a actualizar datos con el nuevo token
+          await _updateDataFromServer();
+
+          success = true;
+        } else {
+          throw Exception(
+              'Error al actualizar el token: ${response.statusCode}');
         }
-
-        // Guardamos el nuevo token en Hive (para offline)
-        await HiveHelper.storeBearerToken(newToken);
-
-        // Volvemos a actualizar datos con el nuevo token
-        await _updateDataFromServer();
-      } else {
-        throw Exception('Error al actualizar el token: ${response.statusCode}');
+      } catch (e) {
+        attempt++;
+        if (attempt < maxAttempts) {
+          // Delay incremental: 2, 4, 6 segundos, etc.
+          await Future.delayed(Duration(seconds: 2 * attempt));
+        }
       }
-    } catch (e) {
-      print('Error al refrescar el token: $e');
-      _showErrorSnackBar('Error al refrescar el token');
     }
+
+    if (!success) {
+      _logout();
+    }
+  }
+
+  // ---------------------------------------------
+  // MÉTODO PARA DESLOGUEAR AL USUARIO
+  // ---------------------------------------------
+  void _logout() {
+    // Redirige al usuario a la pantalla de login y limpia la navegación
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => LoginScreen()),
+      (route) => false,
+    );
   }
 
   // ---------------------------------------------
@@ -243,7 +272,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // ---------------------------------------------
   Future<void> _loadLocalData() async {
     try {
-      // Asumiendo que getEmpresas() y getGrupos() retornan List<Map<String, dynamic>>
       List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
       localEmpresas =
           localEmpresas.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -289,8 +317,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final responseData = response.data;
-
-        // Si data no puede ser null, removemos ?? []
         List<dynamic> rawData = responseData['data'];
         List<Map<String, dynamic>> empresasData =
             rawData.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -305,7 +331,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Agrupamos según "grupo"
         for (var empresa in empresasData) {
-          // Quitamos ?? '' si no puede ser null
           final grupoNombre = empresa['grupo'].toString();
           final grupoId = empresa['id_grupos'].toString();
 
@@ -357,8 +382,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       print('Error updating server data: $e');
       _showErrorSnackBar('Error al actualizar datos del servidor');
-
-      // Si falla, volvemos a cargar local
       await _loadLocalData();
       if (mounted) {
         setState(() {
@@ -432,7 +455,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 (inst) => Map<String, dynamic>.from(inst))
             .toList();
 
-        // Filtrar solo las que coincidan con la empresa
         instalacionesData = instalacionesData.where((inst) {
           return (inst['id_empresas']?.toString() ?? '') == empresaId;
         }).toList();
@@ -538,7 +560,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // ---------------------------------------------
   @override
   Widget build(BuildContext context) {
-    // Filtra las empresas sin grupo que coincidan con la búsqueda
     List<Map<String, dynamic>> empresasSinGrupoFiltradas =
         _getEmpresasSinGrupo();
     if (_searchQuery.isNotEmpty) {
@@ -616,8 +637,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       SizedBox(height: 20),
-
-                      // EMPRESAS SIN GRUPO
                       Text(
                         'Empresas',
                         style: TextStyle(
@@ -639,20 +658,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       SizedBox(height: 20),
-
-                      // Renderizamos las empresas sin grupo
                       for (var empresa in empresasSinGrupoFiltradas)
                         GestureDetector(
                           onTap: () async {
                             id_empresas =
                                 (empresa['id_empresas'] ?? '').toString();
-                            // Guardamos el id_empresas en el box "id_empresas2"
                             await _saveIdEmpresasLocally(id_empresas);
-
                             final String idEmpresaAsociada =
                                 (empresa['id_empresa_asociada'] ?? '')
                                     .toString();
-
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -676,7 +690,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: [
                                 BoxShadow(
-                                  // Reemplazamos withOpacity(0.05) => Color.fromRGBO(0,0,0,0.05)
                                   color: Color.fromRGBO(0, 0, 0, 0.05),
                                   blurRadius: 4,
                                   offset: Offset(0, 2),
@@ -706,10 +719,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         ),
-
                       SizedBox(height: 30),
-
-                      // GRUPOS
                       Text(
                         'Grupos',
                         style: TextStyle(
@@ -731,8 +741,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       SizedBox(height: 20),
-
-                      // Renderizamos los grupos
                       for (var grupo in gruposFiltrados)
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -741,7 +749,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               onTap: () {
                                 final gId = (grupo['id'] ?? '').toString();
                                 if (gId.isEmpty) return;
-
                                 setState(() {
                                   _expandedGroups[gId] = !_expandedGroups[gId]!;
                                 });
@@ -788,8 +795,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                             ),
-
-                            // Expandible: mostrará las empresas de este grupo
                             if (_expandedGroups[
                                     (grupo['id'] ?? '').toString()] ==
                                 true)
@@ -806,14 +811,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                           id_empresas =
                                               (emp['id_empresas'] ?? '')
                                                   .toString();
-                                          // Guardamos el id_empresas en el box "id_empresas2"
                                           await _saveIdEmpresasLocally(
                                               id_empresas);
-
                                           final String idEmpresaAsociada =
                                               (emp['id_empresa_asociada'] ?? '')
                                                   .toString();
-
                                           Navigator.push(
                                             context,
                                             MaterialPageRoute(
@@ -877,7 +879,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                           ],
                         ),
-
                       SizedBox(height: 20),
                     ],
                   ),

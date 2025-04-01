@@ -43,6 +43,8 @@ class LupaEmpresaScreen extends StatefulWidget {
   _LupaEmpresaScreenState createState() => _LupaEmpresaScreenState();
 }
 
+bool _alreadyProcessed = false;
+
 class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     with WidgetsBindingObserver {
   String? selectedContractor;
@@ -273,37 +275,61 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       return;
     }
 
-    try {
-      final response = await dio.post(
-        "https://www.infocontrol.tech/web/api/mobile/service/login",
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization':
-                'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
-          },
-        ),
-        data: jsonEncode({
-          'username': widget.username,
-          'password': widget.password,
-        }),
-      );
+    const int maxAttempts = 3;
+    int attempt = 0;
+    bool success = false;
 
-      if (response.statusCode == 200) {
-        final loginData = response.data;
-        String newToken = loginData['data']['Bearer'];
+    while (attempt < maxAttempts && !success) {
+      try {
+        final response = await dio.post(
+          "https://www.infocontrol.tech/web/api/mobile/service/login",
+          options: Options(
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization':
+                  'Basic ${base64Encode(utf8.encode('${widget.username}:${widget.password}'))}',
+            },
+          ),
+          data: jsonEncode({
+            'username': widget.username,
+            'password': widget.password,
+          }),
+        );
 
-        setState(() {
-          bearerToken = newToken;
-        });
+        if (response.statusCode == 200) {
+          final loginData = response.data;
+          String newToken = loginData['data']['Bearer'].toString();
 
-        print('Token refrescado correctamente en LupaEmpresa: $newToken');
-      } else {
-        throw Exception('Recargando...');
+          setState(() {
+            bearerToken = newToken;
+          });
+
+          print('Token refrescado correctamente en LupaEmpresa: $newToken');
+          success = true;
+        } else {
+          throw Exception(
+              'Error al refrescar el token: ${response.statusCode}');
+        }
+      } catch (e) {
+        attempt++;
+        if (attempt < maxAttempts) {
+          // Espera incremental: 2 segundos en el primer fallo, 4 en el segundo, etc.
+          await Future.delayed(Duration(seconds: 2 * attempt));
+        }
       }
-    } catch (e) {
-      print('Recargando...');
     }
+
+    if (!success) {
+      _logout();
+    }
+  }
+
+  void _logout() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => LoginScreen()),
+      (route) => false,
+    );
   }
 
   // ==================== DESCARGA Y GUARDADO DE EMPLEADOS ====================
@@ -1346,9 +1372,42 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                               content: Text(messageToShow),
                               actions: [
                                 TextButton(
-                                  onPressed: () {
-                                    Navigator.of(ctx2).pop();
-                                    Navigator.of(context).pop();
+                                  onPressed: () async {
+                                    // 1) Cierra el diálogo de respuesta y el modal de detalles.
+                                    Navigator.of(ctx2)
+                                        .pop(); // Cierra el AlertDialog
+                                    Navigator.of(context)
+                                        .pop(); // Cierra el modal de detalles
+
+                                    // 2) Libera los recursos del controlador de la cámara sin await.
+                                    controladorCamara.dispose();
+
+                                    // 3) Agrega un delay de 200 ms.
+                                    await Future.delayed(
+                                        const Duration(milliseconds: 200));
+
+                                    // 4) Activa el indicador de carga (opcional)
+                                    setState(() {
+                                      isLoading = true;
+                                    });
+
+                                    // 5) Recarga la pantalla con pushReplacement.
+                                    Navigator.pushReplacement(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (BuildContext context) =>
+                                            LupaEmpresaScreen(
+                                          empresa: widget.empresa,
+                                          bearerToken: bearerToken,
+                                          idEmpresaAsociada:
+                                              widget.idEmpresaAsociada,
+                                          empresaId: widget.empresaId,
+                                          username: widget.username,
+                                          password: widget.password,
+                                          openScannerOnInit: false,
+                                        ),
+                                      ),
+                                    );
                                   },
                                   child: const Text('OK'),
                                 ),
@@ -1440,7 +1499,37 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               content: Text(messageToShow),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
+                  onPressed: () async {
+                    // 1) Cierra el diálogo.
+                    Navigator.of(ctx).pop();
+
+                    // 2) Libera los recursos de la cámara sin await (porque retorna void)
+                    controladorCamara.dispose();
+
+                    // 3) Agrega un delay de 200 ms para dar tiempo al sistema de liberar memoria.
+                    await Future.delayed(const Duration(milliseconds: 200));
+
+                    // 4) Muestra el indicador de carga (opcional, si lo necesitas)
+                    setState(() {
+                      isLoading = true;
+                    });
+
+                    // 5) Recarga la pantalla con pushReplacement.
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (BuildContext context) => LupaEmpresaScreen(
+                          empresa: widget.empresa,
+                          bearerToken: bearerToken,
+                          idEmpresaAsociada: widget.idEmpresaAsociada,
+                          empresaId: widget.empresaId,
+                          username: widget.username,
+                          password: widget.password,
+                          openScannerOnInit: false,
+                        ),
+                      ),
+                    );
+                  },
                   child: const Text('OK'),
                 ),
               ],
@@ -1609,6 +1698,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       context: context,
       isScrollControlled: true,
       builder: (BuildContext context) {
+        // Reseteamos la bandera cada vez que abrimos la cámara
+        _alreadyProcessed = false;
+
         return SizedBox(
           height: MediaQuery.of(context).size.height * 0.8,
           child: Column(
@@ -1617,16 +1709,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                 backgroundColor: const Color(0xFF2a3666),
                 title: const Text(
                   'Escanear DNI',
-                  style: TextStyle(
-                    fontFamily: 'Montserrat',
-                    color: Colors.white,
-                  ),
+                  style:
+                      TextStyle(fontFamily: 'Montserrat', color: Colors.white),
                 ),
                 leading: IconButton(
                   icon: const Icon(Icons.close, color: Colors.white),
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
+                  onPressed: () => Navigator.pop(context),
                 ),
                 actions: [
                   IconButton(
@@ -1643,113 +1731,104 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               Expanded(
                 child: MobileScanner(
                   controller: controladorCamara,
-                  onDetect: (captura) {
-                    final List<Barcode> codigosBarras = captura.barcodes;
-                    if (codigosBarras.isNotEmpty) {
-                      final String codigoLeido =
-                          codigosBarras.first.rawValue ?? '';
-                      Navigator.pop(context);
+                  // AQUÍ VIENE EL NUEVO onDetect
+                  onDetect: (capture) async {
+                    // Si ya procesamos un QR, no lo vuelvas a procesar
+                    if (_alreadyProcessed) return;
 
-                      // --- NUEVO: Bloque para detectar el DNI mexicano ---
-                      if (codigoLeido.contains("qr.ine.mx")) {
-                        final Uri? uri = Uri.tryParse(codigoLeido);
-                        if (uri != null &&
-                            uri.host == 'qr.ine.mx' &&
-                            uri.pathSegments.isNotEmpty) {
-                          final String numericSegment = uri.pathSegments.first;
-                          String idMexicano = numericSegment
-                              .substring(numericSegment.length - 10);
-                          if (idMexicano.startsWith('0')) {
-                            idMexicano = idMexicano.substring(1);
-                          }
-                          personalIdController.text = idMexicano;
+                    final List<Barcode> barcodes = capture.barcodes;
+                    if (barcodes.isEmpty) return;
+
+                    final String codigoLeido = barcodes.first.rawValue ?? '';
+
+                    // "isRecognized" marcará si el QR pudo parsearse
+                    bool isRecognized = false;
+
+                    // =============== LÓGICA PARA DNI CHILENO ===============
+                    // Verificamos si contiene "registrocivil.cl" y "RUN="
+                    if (codigoLeido.contains("registrocivil.cl") &&
+                        codigoLeido.contains("RUN=")) {
+                      Uri? uri = Uri.tryParse(codigoLeido);
+                      if (uri != null) {
+                        String? runParam = uri.queryParameters["RUN"];
+                        if (runParam != null && runParam.isNotEmpty) {
+                          // Quitamos el guión
+                          final processedRun = runParam.replaceAll('-', '');
+                          personalIdController.text = processedRun;
+
+                          // Marcamos que lo reconocimos
+                          isRecognized = true;
+
+                          // Disparamos la búsqueda con un pequeño delay
                           Future.delayed(const Duration(milliseconds: 300), () {
                             _buscarPersonalId();
                           });
-                          setState(() {
-                            qrScanned = true;
-                          });
-                          return;
                         }
                       }
+                    }
 
-                      // Bloque exclusivo para "Extractos Naturales Gelymar SA."
-                      if (codigoLeido.contains("registrocivil.cl") &&
-                          codigoLeido.contains("RUN=")) {
-                        Uri? uri = Uri.tryParse(codigoLeido);
-                        if (uri != null) {
-                          String? runParam = uri.queryParameters["RUN"];
-                          if (runParam != null) {
-                            final processedRun = runParam.replaceAll('-', '');
-                            personalIdController.text = processedRun;
-                            Future.delayed(const Duration(milliseconds: 300),
-                                () {
-                              _buscarPersonalId();
-                            });
-                            setState(() {
-                              qrScanned = true;
-                            });
-                            return;
-                          }
-                        }
+                    // ============== LÓGICA PARA DNI MEXICANO (INE) ===============
+                    // Ejemplo: "qr.ine.mx"
+                    else if (codigoLeido.contains("qr.ine.mx")) {
+                      Uri? uri = Uri.tryParse(codigoLeido);
+                      if (uri != null && uri.host == 'qr.ine.mx') {
+                        // Extraer lo que necesites, p. ej. los últimos dígitos
+                        // ...
+                        // personalIdController.text = ...
+                        // isRecognized = true;
+                        // Future.delayed(...) => _buscarPersonalId();
                       }
+                    }
 
+                    // ============== LÓGICA PARA CÓDIGO JSON ===============
+                    else {
                       try {
-                        bool isJson = false;
-                        dynamic decoded;
-                        try {
-                          decoded = jsonDecode(codigoLeido);
-                          isJson = true;
-                        } catch (_) {
-                          // No es JSON
-                        }
-
-                        if (isJson &&
-                            decoded != null &&
-                            decoded is Map<String, dynamic>) {
+                        final decoded = jsonDecode(codigoLeido);
+                        if (decoded is Map<String, dynamic>) {
                           final entidad = decoded['entidad'];
-                          // Procesamiento para empleado
                           if (entidad == 'empleado') {
-                            final dni = decoded['dni'] ?? 'DNI no disponible';
-                            personalIdController.text = dni;
+                            final dni = decoded['dni'] ?? '';
+                            personalIdController.text = dni.toString();
                             Future.delayed(const Duration(milliseconds: 300),
                                 () {
                               _buscarPersonalId();
                             });
-                          }
-                          // Procesamiento para vehículo
-                          else if (entidad == 'vehiculo') {
+                            isRecognized = true;
+                          } else if (entidad == 'vehiculo') {
                             final dom = decoded['dominio'] ?? '';
-                            dominioController.text = dom;
+                            dominioController.text = dom.toString();
                             Future.delayed(const Duration(milliseconds: 300),
                                 () {
                               _buscarDominio();
                             });
+                            isRecognized = true;
                           }
-
-                          setState(() {
-                            qrScanned = true;
-                          });
-                        } else {
-                          // Si no es JSON, intenta separar usando '@'
-                          final partes = codigoLeido.split('@');
-                          if (partes.length >= 5) {
-                            final dniParseado = partes[4].trim();
-                            if (dniParseado.isNotEmpty) {
-                              personalIdController.text = dniParseado;
-                              Future.delayed(const Duration(milliseconds: 300),
-                                  () {
-                                _buscarPersonalId();
-                              });
-                              setState(() {
-                                qrScanned = true;
-                              });
-                            }
-                          }
+                          // Si quieres más casos...
                         }
                       } catch (_) {
-                        // Manejo de error en la decodificación
+                        // No es JSON válido
                       }
+                    }
+
+                    // ==================== AL FINAL ====================
+                    if (isRecognized) {
+                      _alreadyProcessed = true;
+                      // Ahora sí cerramos la cámara
+                      Navigator.pop(context);
+                    } else {
+                      // Mostrar un aviso rápido al usuario:
+                      // (puedes usar un AlertDialog o un SnackBar)
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Código no reconocido. Intente de nuevo.',
+                            style: TextStyle(fontFamily: 'Montserrat'),
+                          ),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                      // Importante: NO cerrar la cámara.
+                      // Así el usuario puede re-escanear.
                     }
                   },
                 ),
@@ -1806,9 +1885,11 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   // ==================== MOSTRAR DETALLES DEL EMPLEADO ====================
   Future<void> _showEmpleadoDetailsModal(dynamic empleado) async {
+    // Obtenemos el estado del empleado
     final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
     final bool isHabilitado = estado == 'habilitado';
 
+    // Extraemos datos del empleado (nombre, apellido, dni)
     final datosString = empleado['datos']?.toString() ?? '';
     String apellidoVal = '';
     String nombreVal = '';
@@ -1841,10 +1922,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         ? "No disponible"
         : "$apellidoVal $nombreVal";
 
+    // Obtenemos el id de la entidad
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
+    // Usamos el estado interno para un fallback inicial
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
 
+    // ===================== FORZAR: CONSULTA AL SERVIDOR ANTES DE ABRIR EL MODAL =====================
     final dataResource = await _fetchActionResourceData(idEntidad);
     final String actionMessage =
         dataResource['message']?.toString().trim() ?? '';
@@ -1854,8 +1938,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     } else if (actionMessage == "REGISTRAR EGRESO") {
       buttonText = "Registrar Egreso";
     }
+    // =============================================================================================
 
-    // Verificamos si hay docs faltantes
+    // Verificamos si hay documentación faltante (en caso de no estar habilitado)
     List<String> missingDocs = [];
     if (!isHabilitado) {
       final motivoConExcepcion = dataResource["motivo_con_excepcion"];
@@ -1878,6 +1963,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     final contratistaSeleccionado = selectedContractor ?? 'Inhabilitado';
     bool showActionButton = isHabilitado;
 
+    // Ahora, se abre el modal con la información y el botón que muestra la acción (Ingreso/Egreso)
     showDialog(
       context: context,
       builder: (BuildContext context) {
