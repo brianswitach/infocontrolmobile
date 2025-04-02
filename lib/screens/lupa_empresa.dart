@@ -1373,25 +1373,18 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                               actions: [
                                 TextButton(
                                   onPressed: () async {
-                                    // 1) Cierra el diálogo de respuesta y el modal de detalles.
+                                    // 1) Cerrar el diálogo de respuesta y el modal de detalles
                                     Navigator.of(ctx2)
                                         .pop(); // Cierra el AlertDialog
                                     Navigator.of(context)
                                         .pop(); // Cierra el modal de detalles
 
-                                    // 2) Libera los recursos del controlador de la cámara sin await.
-                                    controladorCamara.dispose();
-
-                                    // 3) Agrega un delay de 200 ms.
-                                    await Future.delayed(
-                                        const Duration(milliseconds: 200));
-
-                                    // 4) Activa el indicador de carga (opcional)
+                                    // 2) Mostrar el indicador de carga en la pantalla previa
                                     setState(() {
                                       isLoading = true;
                                     });
 
-                                    // 5) Recarga la pantalla con pushReplacement.
+                                    // 3) Recargar la pantalla completamente con pushReplacement
                                     Navigator.pushReplacement(
                                       context,
                                       MaterialPageRoute(
@@ -1500,21 +1493,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               actions: [
                 TextButton(
                   onPressed: () async {
-                    // 1) Cierra el diálogo.
+                    // 1) Cerrar el diálogo
                     Navigator.of(ctx).pop();
 
-                    // 2) Libera los recursos de la cámara sin await (porque retorna void)
-                    controladorCamara.dispose();
-
-                    // 3) Agrega un delay de 200 ms para dar tiempo al sistema de liberar memoria.
-                    await Future.delayed(const Duration(milliseconds: 200));
-
-                    // 4) Muestra el indicador de carga (opcional, si lo necesitas)
+                    // 2) Mostrar el indicador de carga en esta misma pantalla
                     setState(() {
                       isLoading = true;
                     });
 
-                    // 5) Recarga la pantalla con pushReplacement.
+                    // 3) Recargar la pantalla completamente con pushReplacement
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(
@@ -3092,6 +3079,17 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               ),
             ),
     );
+  }
+
+// ---------------- Función para reiniciar el escáner ----------------
+  void _resetScanner() {
+    // Detiene el escáner actual
+    controladorCamara.stop();
+    // Espera 200 ms para dar tiempo al sistema de liberar recursos
+    Future.delayed(const Duration(milliseconds: 200), () {
+      // Reinicia el escáner
+      controladorCamara.start();
+    });
   }
 
   void _autoProcessGelymarURL() {
