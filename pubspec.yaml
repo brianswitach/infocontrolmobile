@@ -30,7 +30,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  url_launcher: ^6.0.20
+  url_launcher: ^6.2.1  
+  #url_launcher: ^6.0.20
   cupertino_icons: ^1.0.8
   dio: ^5.7.0
   hive: ^2.2.3

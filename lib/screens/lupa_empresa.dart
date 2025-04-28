@@ -43,7 +43,7 @@ class LupaEmpresaScreen extends StatefulWidget {
   _LupaEmpresaScreenState createState() => _LupaEmpresaScreenState();
 }
 
-bool _alreadyProcessed = false;
+//bool _alreadyProcessed = false;
 
 class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     with WidgetsBindingObserver {
@@ -76,7 +76,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   bool isLoading = true;
   bool _autoProcessingGelymar = false;
 
-  final MobileScannerController controladorCamara = MobileScannerController();
+  //final MobileScannerController controladorCamara = MobileScannerController();
   final TextEditingController personalIdController = TextEditingController();
 
   // TextEditingController para el front de "Dominio":
@@ -197,7 +197,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   @override
   void dispose() {
-    controladorCamara.dispose();
+    //controladorCamara.dispose();
     personalIdController.dispose();
     dominioController.dispose();
     searchController.dispose();
@@ -1684,12 +1684,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (BuildContext context) {
-        // Reseteamos la bandera cada vez que abrimos la cámara
-        _alreadyProcessed = false;
+      builder: (sheetCtx) {
+        // ► Cada vez que abres el modal creas un controlador NUEVO
+        final camController = MobileScannerController();
+        bool alreadyProcessed = false; // bandera local
 
         return SizedBox(
-          height: MediaQuery.of(context).size.height * 0.8,
+          height: MediaQuery.of(sheetCtx).size.height * 0.8,
           child: Column(
             children: [
               AppBar(
@@ -1701,52 +1702,46 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                 ),
                 leading: IconButton(
                   icon: const Icon(Icons.close, color: Colors.white),
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(sheetCtx),
                 ),
                 actions: [
                   IconButton(
                     icon: const Icon(Icons.flash_on, color: Colors.white),
-                    onPressed: () => controladorCamara.toggleTorch(),
+                    onPressed: () => camController.toggleTorch(),
                   ),
                   IconButton(
                     icon: const Icon(Icons.flip_camera_android,
                         color: Colors.white),
-                    onPressed: () => controladorCamara.switchCamera(),
+                    onPressed: () => camController.switchCamera(),
                   ),
                 ],
               ),
+
+              // ---------------- VIDEO + DECODIFICACIÓN ----------------
               Expanded(
                 child: MobileScanner(
-                  controller: controladorCamara,
-                  // AQUÍ VIENE EL NUEVO onDetect
+                  controller: camController,
                   onDetect: (capture) async {
-                    // Si ya procesamos un QR, no lo vuelvas a procesar
-                    if (_alreadyProcessed) return;
+                    // Evitamos procesar más de una vez
+                    if (alreadyProcessed) return;
 
-                    final List<Barcode> barcodes = capture.barcodes;
+                    final barcodes = capture.barcodes;
                     if (barcodes.isEmpty) return;
 
                     final String codigoLeido = barcodes.first.rawValue ?? '';
-
-                    // "isRecognized" marcará si el QR pudo parsearse
                     bool isRecognized = false;
 
-                    // =============== LÓGICA PARA DNI CHILENO ===============
-                    // Verificamos si contiene "registrocivil.cl" y "RUN="
-                    if (codigoLeido.contains("registrocivil.cl") &&
-                        codigoLeido.contains("RUN=")) {
+                    // ===== 1) DNI chileno (Registro Civil) =====
+                    if (codigoLeido.contains('registrocivil.cl') &&
+                        codigoLeido.contains('RUN=')) {
                       Uri? uri = Uri.tryParse(codigoLeido);
                       if (uri != null) {
-                        String? runParam = uri.queryParameters["RUN"];
+                        String? runParam = uri.queryParameters['RUN'];
                         if (runParam != null && runParam.isNotEmpty) {
-                          // Quitamos el guión
                           final processedRun = runParam.replaceAll('-', '');
                           personalIdController.text = processedRun;
-
-                          // Marcamos que lo reconocimos
                           isRecognized = true;
-
-                          // Disparamos la búsqueda con un pequeño delay
+                          // disparamos búsqueda después de un pequeño delay
                           Future.delayed(const Duration(milliseconds: 300), () {
                             _buscarPersonalId();
                           });
@@ -1754,20 +1749,57 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                       }
                     }
 
-                    // ============== LÓGICA PARA DNI MEXICANO (INE) ===============
-                    // Ejemplo: "qr.ine.mx"
-                    else if (codigoLeido.contains("qr.ine.mx")) {
+                    // ===== 2) Credencial INE (México) =====
+                    else if (codigoLeido.contains('qr.ine.mx')) {
                       Uri? uri = Uri.tryParse(codigoLeido);
+
+                      // Comprobamos que realmente sea del dominio INE
                       if (uri != null && uri.host == 'qr.ine.mx') {
-                        // Extraer lo que necesites, p. ej. los últimos dígitos
-                        // ...
-                        // personalIdController.text = ...
-                        // isRecognized = true;
-                        // Future.delayed(...) => _buscarPersonalId();
+                        /* --------------------------------------------------------------
+     * Formato típico:
+     *   https://qr.ine.mx/<OCR>/<FECHA>/P/<FOLIO>
+     * Ahora queremos <OCR>  →  primer segmento del path
+     * -------------------------------------------------------------*/
+
+                        // 1️⃣ Dividimos el path y limpiamos posibles “/” vacíos
+                        final segments = uri.path
+                            .split('/')
+                            .where((s) => s.trim().isNotEmpty)
+                            .toList(); //  ["2490107…","20161027","P","001436"]
+
+                        // 2️⃣ Tomamos el PRIMER segmento (OCR completo)
+                        String? ocrFromPath;
+                        if (segments.isNotEmpty) {
+                          ocrFromPath =
+                              segments[0].trim(); // "249010728210600153126452"
+                        }
+
+                        // 3️⃣ Compatibilidad: si algo saliera mal, probamos ?ocr= o ?curp=
+                        final ocrParam = uri.queryParameters['ocr'] ??
+                            uri.queryParameters['OCR'];
+                        final curpParam = uri.queryParameters['curp'] ??
+                            uri.queryParameters['CURP'];
+
+                        final String valorINE =
+                            (ocrFromPath != null && ocrFromPath.isNotEmpty)
+                                ? ocrFromPath
+                                : (ocrParam != null && ocrParam.isNotEmpty)
+                                    ? ocrParam
+                                    : (curpParam ?? '');
+
+                        // 4️⃣ Si tenemos un valor, lo ponemos en el TextField y disparamos la búsqueda
+                        if (valorINE.isNotEmpty) {
+                          personalIdController.text = valorINE;
+                          isRecognized = true;
+
+                          Future.delayed(const Duration(milliseconds: 300), () {
+                            _buscarPersonalId(); // continúa el flujo normal (modal, etc.)
+                          });
+                        }
                       }
                     }
 
-                    // ============== LÓGICA PARA CÓDIGO JSON ===============
+                    // ===== 3) Códigos QR propios en JSON =====
                     else {
                       try {
                         final decoded = jsonDecode(codigoLeido);
@@ -1776,46 +1808,35 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           if (entidad == 'empleado') {
                             final dni = decoded['dni'] ?? '';
                             personalIdController.text = dni.toString();
+                            isRecognized = true;
                             Future.delayed(const Duration(milliseconds: 300),
                                 () {
                               _buscarPersonalId();
                             });
-                            isRecognized = true;
                           } else if (entidad == 'vehiculo') {
                             final dom = decoded['dominio'] ?? '';
                             dominioController.text = dom.toString();
+                            isRecognized = true;
                             Future.delayed(const Duration(milliseconds: 300),
                                 () {
                               _buscarDominio();
                             });
-                            isRecognized = true;
                           }
-                          // Si quieres más casos...
                         }
                       } catch (_) {
-                        // No es JSON válido
+                        // no es JSON → se ignora
                       }
                     }
 
-                    // ==================== AL FINAL ====================
+                    // ===== 4) Resultado final =====
                     if (isRecognized) {
-                      _alreadyProcessed = true;
-                      // Ahora sí cerramos la cámara
-                      Navigator.pop(context);
-                    } else {
-                      // Mostrar un aviso rápido al usuario:
-                      // (puedes usar un AlertDialog o un SnackBar)
-                      ScaffoldMessenger.of(this.context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Código no reconocido. Intente de nuevo.',
-                            style: TextStyle(fontFamily: 'Montserrat'),
-                          ),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                      // Importante: NO cerrar la cámara.
-                      // Así el usuario puede re-escanear.
+                      alreadyProcessed = true; // bloquea re‑escaneos
+                      await camController.stop(); // libera la cámara
+                      if (sheetCtx.mounted)
+                        Navigator.pop(sheetCtx); // cierra modal
+                      if (mounted)
+                        setState(
+                            () => qrScanned = true); // cambia texto del botón
                     }
                   },
                 ),
@@ -1947,7 +1968,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
     final missingDocsStr = missingDocs.join(", ");
 
-    final contratistaSeleccionado = selectedContractor ?? 'Inhabilitado';
+    //final contratistaSeleccionado = selectedContractor ?? 'Inhabilitado';
     bool showActionButton = isHabilitado;
 
     // Ahora, se abre el modal con la información y el botón que muestra la acción (Ingreso/Egreso)
@@ -3082,15 +3103,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
 // ---------------- Función para reiniciar el escáner ----------------
-  void _resetScanner() {
-    // Detiene el escáner actual
-    controladorCamara.stop();
-    // Espera 200 ms para dar tiempo al sistema de liberar recursos
-    Future.delayed(const Duration(milliseconds: 200), () {
-      // Reinicia el escáner
-      controladorCamara.start();
-    });
-  }
+  // void _resetScanner() {
+  // Detiene el escáner actual
+  // controladorCamara.stop();
+  // Espera 200 ms para dar tiempo al sistema de liberar recursos
+  //Future.delayed(const Duration(milliseconds: 200), () {
+  // Reinicia el escáner
+  // controladorCamara.start();
+  //});
+  //}
 
   void _autoProcessGelymarURL() {
     // Ahora se aplica para TODAS las empresas.
