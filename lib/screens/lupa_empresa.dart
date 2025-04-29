@@ -629,12 +629,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             List<dynamic> employeesData = responseData['data'] ?? [];
 
             final foundEmployee = employeesData.firstWhere((emp) {
-              final val = emp['valor']?.toString().trim() ?? '';
+              final val = emp['valor']?.toString().trim() ?? ''; // DNI
               final cuit = emp['cuit']?.toString().trim() ?? '';
               final cuil = emp['cuil']?.toString().trim() ?? '';
+              final ine = emp['ine']?.toString().trim() ?? ''; // ←── NUEVO
+
               return (val == dniIngresado ||
                   cuit == dniIngresado ||
-                  cuil == dniIngresado);
+                  cuil == dniIngresado ||
+                  ine == dniIngresado); // ←── compara INE
             }, orElse: () => null);
 
             if (foundEmployee != null) {
@@ -940,6 +943,65 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         },
       );
     }
+  }
+
+  // ================================================================
+// BUSCAR EMPLEADO POR OCR / INE (sólo para credencial mexicana INE)
+// ================================================================
+  Future<void> _buscarEmpleadoPorIne(String ocr) async {
+    if (ocr.isEmpty) return;
+
+    // 1. Loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final response = await _makeGetRequest(
+        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+        queryParameters: {
+          'id_empresas': widget.empresaId,
+          'id_proveedores': selectedContractorId ?? ''
+        },
+      );
+      Navigator.pop(context); // quita loading
+
+      if ((response.statusCode ?? 0) == 200) {
+        final List empleadosData = response.data['data'] ?? [];
+
+        final encontrado = empleadosData.firstWhere(
+          (emp) => (emp['ine']?.toString().trim() ?? '') == ocr,
+          orElse: () => null,
+        );
+
+        if (encontrado != null) {
+          _showEmpleadoDetailsModal(encontrado);
+        } else {
+          _alerta('No se encontró ningún empleado con ese INE.');
+        }
+      } else {
+        _alerta('Error ${response.statusCode} al consultar empleados.');
+      }
+    } catch (e) {
+      Navigator.pop(context);
+      _alerta('Error inesperado: $e');
+    }
+  }
+
+// --- pequeña util para mostrar mensaje simple ---
+  void _alerta(String msg) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        content: Text(msg),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text('OK'))
+        ],
+      ),
+    );
   }
 
   // ==================== BÚSQUEDA POR DOMINIO/PLACA (con checks) ====================
@@ -1793,7 +1855,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           isRecognized = true;
 
                           Future.delayed(const Duration(milliseconds: 300), () {
-                            _buscarPersonalId(); // continúa el flujo normal (modal, etc.)
+                            _buscarEmpleadoPorIne(valorINE);
+                            //  _buscarPersonalId(); // continúa el flujo normal (modal, etc.)
                           });
                         }
                       }
@@ -1880,6 +1943,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       );
 
       if ((response.statusCode ?? 0) == 200) {
+        debugPrint(jsonEncode(response.data));
         final respData = response.data ?? {};
         final data = respData['data'] ?? {};
         return data;
