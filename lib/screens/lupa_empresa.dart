@@ -348,12 +348,18 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
 
     try {
+      // 1️⃣ Armo params dinámicos
+      final Map<String, dynamic> params = {
+        'id_empresas': widget.empresaId,
+      };
+      if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
+        params['id_proveedores'] = selectedContractorId;
+      }
+
+// 2️⃣ Llamada GET con params dinámicos
       final response = await _makeGetRequest(
-        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-        queryParameters: {
-          'id_empresas': widget.empresaId,
-          'id_proveedores': selectedContractorId ?? ''
-        },
+        'https://www.infocontrol.tech/web/api/mobile/empleados/listartest',
+        queryParameters: params,
       );
 
       final statusCode = response.statusCode ?? 0;
@@ -615,13 +621,19 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         }
 
         try {
+          // — COPIA de aquí —
+          final Map<String, dynamic> params = {
+            'id_empresas': widget.empresaId,
+          };
+          if (selectedContractorId != null &&
+              selectedContractorId!.isNotEmpty) {
+            params['id_proveedores'] = selectedContractorId!;
+          }
           final response = await _makeGetRequest(
             "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-            queryParameters: {
-              'id_empresas': widget.empresaId,
-              'id_proveedores': selectedContractorId ?? ''
-            },
+            queryParameters: params,
           );
+// — hasta aquí —
 
           final statusCode = response.statusCode ?? 0;
           if (statusCode == 200) {
@@ -838,12 +850,15 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     );
 
     try {
+      final Map<String, dynamic> params = {
+        'id_empresas': widget.empresaId,
+      };
+      if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
+        params['id_proveedores'] = selectedContractorId!;
+      }
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-        queryParameters: {
-          'id_empresas': widget.empresaId,
-          'id_proveedores': selectedContractorId ?? ''
-        },
+        queryParameters: params,
       );
 
       Navigator.pop(context);
@@ -959,13 +974,17 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     );
 
     try {
+      final Map<String, dynamic> params = {
+        'id_empresas': widget.empresaId,
+      };
+      if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
+        params['id_proveedores'] = selectedContractorId!;
+      }
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
-        queryParameters: {
-          'id_empresas': widget.empresaId,
-          'id_proveedores': selectedContractorId ?? ''
-        },
+        queryParameters: params,
       );
+
       Navigator.pop(context); // quita loading
 
       if ((response.statusCode ?? 0) == 200) {
