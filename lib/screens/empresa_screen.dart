@@ -8,8 +8,8 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
 class EmpresaScreen extends StatefulWidget {
-  final String empresaId; // id_empresas
-  final String bearerToken; // <--- Recibe el token actualizado desde HomeScreen
+  final String empresaId;
+  final String bearerToken;
   final Map<String, dynamic> empresaData;
 
   EmpresaScreen({
@@ -34,7 +34,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
   @override
   void initState() {
     super.initState();
-    // Configurar Dio con manejo automático de cookies
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
@@ -93,7 +92,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
     }
   }
 
-  // Utiliza el bearer token que llega por parámetro
   Future<void> _fetchInstalacionesFromServer() async {
     try {
       final response = await dio.get(
@@ -129,13 +127,11 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
           _isLoading = false;
         });
 
-        // Cerrar el dialogo "Cargando..."
         Navigator.pop(context);
       } else {
         _loadInstalacionesFromHive();
       }
     } catch (e) {
-      print('Error fetching instalaciones from server: $e');
       _loadInstalacionesFromHive();
     }
   }
@@ -154,7 +150,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
       _isLoading = false;
     });
 
-    // Cerrar el dialogo "Cargando..."
     Navigator.pop(context);
   }
 
@@ -181,8 +176,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // descomentar esto si lo voy a usar String tipoCliente = widget.empresaData['tipo_cliente'] ?? '';
-
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
@@ -194,16 +187,16 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
             IconButton(
               icon: Icon(Icons.search, color: Color(0xFF2a3666)),
               onPressed: () {
-                // Navegamos a LupaEmpresaScreen pasando el token que recibimos
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => LupaEmpresaScreen(
-                      empresaId: widget.empresaId,
-                      bearerToken: widget.bearerToken, // Pasa el mismo token
+                      empresa: widget.empresaData,
+                      bearerToken: widget.bearerToken,
                       idEmpresaAsociada: widget.empresaId,
-                      empresa: widget.empresaData, username: '', password: '',
-                      //justo aca arriba sacar esto:
+                      empresaId: widget.empresaId,
+                      username: '',
+                      password: '',
                     ),
                   ),
                 );
@@ -284,7 +277,6 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
               Center(
                 child: OutlinedButton(
                   onPressed: () {
-                    // Vuelve al HomeScreen
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(
@@ -293,6 +285,7 @@ class _EmpresaScreenState extends State<EmpresaScreen> {
                           empresas: [],
                           username: '',
                           password: '',
+                          puedeEntrarLupa: false,
                         ),
                       ),
                       (Route<dynamic> route) => false,

@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
 
-    // Inicializamos Hive y abrimos la box "id_usuarios2" y la de credenciales
+    // Inicializamos Hive y abrimos las boxes necesarias
     _initHive().then((_) async {
       await _openIdUsuariosBox();
       await _openCredentialsBox();
@@ -100,7 +100,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _launchURL(String urlString) async {
     final Uri uri = Uri.parse(urlString);
-
     if (!await launchUrl(
       uri,
       mode: LaunchMode.externalApplication,
@@ -122,7 +121,6 @@ class _LoginScreenState extends State<LoginScreen> {
       'promoSubtitle': 'Control integral, resultados sobresalientes.',
       'learnMore': 'Conocer más',
     };
-
     return _spanishText[key] ?? '';
   }
 
@@ -178,17 +176,18 @@ class _LoginScreenState extends State<LoginScreen> {
             storedPass.isNotEmpty &&
             storedUser == username &&
             storedPass == password) {
-          // Coinciden: Buscamos empresas locales
+          // Coinciden: flujo offline, rol no permite Lupa
           List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
           if (localEmpresas.isNotEmpty) {
             Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => HomeScreen(
-                  bearerToken: bearerToken, // Será vacío offline
+                  bearerToken: bearerToken,
                   empresas: localEmpresas,
                   username: username,
                   password: password,
+                  puedeEntrarLupa: false,
                 ),
               ),
             );
@@ -218,18 +217,34 @@ class _LoginScreenState extends State<LoginScreen> {
         }),
       );
 
+      debugPrint('LOGIN RESPONSE FULL: ${jsonEncode(loginResponse.data)}',
+          wrapWidth: 1024);
+
       final statusCode = loginResponse.statusCode;
       final responseData = loginResponse.data;
 
       if (statusCode == 200) {
         bearerToken = responseData['data']['Bearer'] ?? '';
 
-        // Guardar id_usuarios en variable local
+        // Guardar id_usuarios
         final userData = responseData['data']['userData'] ?? {};
         id_usuarios = userData['id_usuarios']?.toString() ?? '';
-
-        // GUARDAR id_usuarios en la box "id_usuarios2"
         await _storeIdUsuariosInBox(id_usuarios);
+
+        // Nueva lógica de autorización para módulo de LupaEmpresa
+        final String rolInfocontrol =
+            userData['rol_infocontrol']?.toString() ?? '';
+        final String rol = userData['rol']?.toString() ?? '';
+        bool puedeEntrarLupa = false;
+        if (rolInfocontrol == '1') {
+          puedeEntrarLupa = true;
+        } else if (rolInfocontrol == '0' &&
+            (rol == 'd3e5dc5b-2087-11e8-aae7-708bcd9bba51' ||
+                rol == '3b19834a-b57f-11ea-8412-d017c218b4b7' ||
+                rol == '43f15786-1128-11e6-b077-0025d318e182' ||
+                rol == 'e782765c-26e5-11e8-9f46-708bcd9bba51')) {
+          puedeEntrarLupa = true;
+        }
 
         // Si el checkbox de "Recordar datos" está activo, guardamos las credenciales
         if (_showPendingMessages) {
@@ -243,7 +258,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         await sendRequest();
 
-        Navigator.pop(context);
+        Navigator.pop(context); // Cerramos el diálogo de "Cargando..."
 
         Navigator.push(
           context,
@@ -253,6 +268,7 @@ class _LoginScreenState extends State<LoginScreen> {
               empresas: empresas,
               username: username,
               password: password,
+              puedeEntrarLupa: puedeEntrarLupa,
             ),
           ),
         );
@@ -301,9 +317,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         final responseData = response.data;
         empresas = List<Map<String, dynamic>>.from(responseData['data']);
-
         await HiveHelper.insertEmpresas(empresas);
-
         setState(() {
           empresaNombre = empresas.isNotEmpty ? empresas[0]['nombre'] : null;
           empresaId =
@@ -341,7 +355,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _launchForgotPassword() async {
     final url =
-        'https://www.infocontrol.tech/web/usuarios/recuperar_contrasena?lg=arg';
+        'https://www.infocontrol.tech/web/web/usuarios/recuperar_contrasena?lg=arg';
     await _launchURL(url);
   }
 

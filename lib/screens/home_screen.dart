@@ -8,10 +8,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
-
-// IMPORTAMOS LOGIN_SCREEN PARA PODER DESLOGUEAR
-import 'login_screen.dart';
-
+import './login_screen.dart';
 import './lupa_empresa.dart';
 import 'hive_helper.dart';
 
@@ -20,12 +17,14 @@ class HomeScreen extends StatefulWidget {
   final List<Map<String, dynamic>> empresas;
   final String username;
   final String password;
+  final bool puedeEntrarLupa;
 
   HomeScreen({
     required this.bearerToken,
     required this.empresas,
     required this.username,
     required this.password,
+    required this.puedeEntrarLupa,
   });
 
   @override
@@ -38,49 +37,29 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> empresas = [];
   List<Map<String, dynamic>> gruposFiltrados = [];
   List<Map<String, dynamic>> grupos = [];
-
   bool _isLoading = true;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> empresasFiltradas = [];
-
   late Dio dio;
   late CookieJar cookieJar;
-
   String id_empresas = "";
-
-  // Control de expansión de grupos
   Map<String, bool> _expandedGroups = {};
 
   @override
   void initState() {
     super.initState();
-
-    // Inicializamos Hive
     _initHive();
-
-    // Recibimos el token inicial y la lista de empresas
     bearerToken = widget.bearerToken;
     empresas = widget.empresas;
     empresasFiltradas = widget.empresas;
-
     cookieJar = CookieJar();
     dio = Dio();
     dio.interceptors.add(CookieManager(cookieJar));
-
-    // Guardamos el token inicial en Hive (para offline)
     HiveHelper.storeBearerToken(bearerToken);
-
-    // Inicia la rutina de refresco cada 4min 10s (250s aprox)
     _startTokenRefreshTimer();
-
-    // Chequeamos la conexión ANTES de todo
     _checkConnectionAndLoadData();
-
-    // Configuramos el listener de conectividad
     _setupConnectivityListener();
-
-    // Escuchamos cambios en el texto de búsqueda
     _searchController.addListener(_onSearchChanged);
   }
 
@@ -89,14 +68,9 @@ class _HomeScreenState extends State<HomeScreen> {
     Hive.init(appDocDir.path);
   }
 
-  // ---------------------------------------------
-  // DETECTA SI HAY CONEXIÓN Y CARGA DATOS
-  // ---------------------------------------------
   Future<void> _checkConnectionAndLoadData() async {
     final connectivityResult = await Connectivity().checkConnectivity();
-
     if (connectivityResult == ConnectivityResult.none) {
-      // No hay conexión -> cargamos datos locales
       await _loadLocalData();
       if (!mounted) return;
       setState(() {
@@ -104,20 +78,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _isLoading = false;
       });
     } else {
-      // Hay conexión -> traemos datos del servidor
       _updateDataFromServer();
     }
   }
 
-  // ---------------------------------------------
-  // LISTENER DE CONECTIVIDAD
-  // ---------------------------------------------
   void _setupConnectivityListener() {
     Connectivity()
         .onConnectivityChanged
         .listen((ConnectivityResult result) async {
       if (result == ConnectivityResult.none) {
-        // No hay conexión -> cargamos datos locales
         await _loadLocalData();
         if (!mounted) return;
         setState(() {
@@ -125,15 +94,11 @@ class _HomeScreenState extends State<HomeScreen> {
           _isLoading = false;
         });
       } else {
-        // Hay conexión -> refrescar token (y traer data si corresponde)
         await _refreshBearerToken();
       }
     });
   }
 
-  // ---------------------------------------------
-  // MANEJO DE BÚSQUEDAS
-  // ---------------------------------------------
   void _onSearchChanged() {
     final query = _searchController.text.toLowerCase().trim();
     setState(() {
@@ -142,28 +107,22 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Filtra empresas y grupos según el texto de _searchQuery
   void _filterData() {
     if (_searchQuery.isEmpty) {
       empresasFiltradas = List.from(empresas);
       gruposFiltrados = List.from(grupos);
       return;
     }
-
     empresasFiltradas = empresas.where((empresa) {
       final nombre = (empresa['nombre'] ?? '').toString().toLowerCase();
       return nombre.startsWith(_searchQuery);
     }).toList();
-
     gruposFiltrados = grupos.where((grupo) {
       final gNombre = (grupo['nombre'] ?? '').toString().toLowerCase();
       return gNombre.startsWith(_searchQuery);
     }).toList();
   }
 
-  // ---------------------------------------------
-  // DISPOSE
-  // ---------------------------------------------
   @override
   void dispose() {
     _refreshTimer?.cancel();
@@ -171,9 +130,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // ---------------------------------------------
-  // RUTINA PARA REFRESCAR TOKEN CON REINTENTOS
-  // ---------------------------------------------
   void _startTokenRefreshTimer() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(
@@ -185,14 +141,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _refreshBearerToken() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      print('No hay conexión. No se puede refrescar el token.');
       return;
     }
-
     const int maxAttempts = 3;
     int attempt = 0;
     bool success = false;
-
     while (attempt < maxAttempts && !success) {
       try {
         final response = await dio.post(
@@ -209,23 +162,16 @@ class _HomeScreenState extends State<HomeScreen> {
             'password': widget.password,
           }),
         );
-
         if (response.statusCode == 200) {
           final loginData = response.data;
           String newToken = (loginData['data']['Bearer']).toString();
-
           if (mounted) {
             setState(() {
               bearerToken = newToken;
             });
           }
-
-          // Guardamos el nuevo token en Hive (para offline)
           await HiveHelper.storeBearerToken(newToken);
-
-          // Volvemos a actualizar datos con el nuevo token
           await _updateDataFromServer();
-
           success = true;
         } else {
           throw Exception(
@@ -234,22 +180,16 @@ class _HomeScreenState extends State<HomeScreen> {
       } catch (e) {
         attempt++;
         if (attempt < maxAttempts) {
-          // Delay incremental: 2, 4, 6 segundos, etc.
           await Future.delayed(Duration(seconds: 2 * attempt));
         }
       }
     }
-
     if (!success) {
       _logout();
     }
   }
 
-  // ---------------------------------------------
-  // MÉTODO PARA DESLOGUEAR AL USUARIO
-  // ---------------------------------------------
   void _logout() {
-    // Redirige al usuario a la pantalla de login y limpia la navegación
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => LoginScreen()),
@@ -257,35 +197,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ---------------------------------------------
-  // SNACK BAR DE ERROR
-  // ---------------------------------------------
-  void _showErrorSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
-
-  // ---------------------------------------------
-  // CARGA DATOS LOCALES (OFFLINE)
-  // ---------------------------------------------
   Future<void> _loadLocalData() async {
     try {
       List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
       localEmpresas =
           localEmpresas.map((e) => Map<String, dynamic>.from(e)).toList();
-
       List<Map<String, dynamic>> localGrupos = HiveHelper.getGrupos();
       localGrupos =
           localGrupos.map((e) => Map<String, dynamic>.from(e)).toList();
-
       empresas = localEmpresas;
       grupos = localGrupos;
       gruposFiltrados = localGrupos;
       empresasFiltradas = localEmpresas;
     } catch (e) {
-      print('Error loading local data: $e');
       empresas = [];
       grupos = [];
       empresasFiltradas = [];
@@ -293,15 +217,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ---------------------------------------------
-  // ACTUALIZA DATOS DESDE EL SERVIDOR
-  // ---------------------------------------------
   Future<void> _updateDataFromServer() async {
     if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
-
     try {
       final response = await dio.get(
         "https://www.infocontrol.tech/web/api/mobile/empresas/listar",
@@ -312,28 +232,21 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         ),
       );
-
       if (!mounted) return;
-
       if (response.statusCode == 200) {
         final responseData = response.data;
         List<dynamic> rawData = responseData['data'];
         List<Map<String, dynamic>> empresasData =
             rawData.map((e) => Map<String, dynamic>.from(e)).toList();
-
         Set<String> gruposUnicos = {};
         List<Map<String, dynamic>> gruposData = [];
-
         empresas.clear();
         empresasFiltradas.clear();
         grupos.clear();
         gruposFiltrados.clear();
-
-        // Agrupamos según "grupo"
         for (var empresa in empresasData) {
           final grupoNombre = empresa['grupo'].toString();
           final grupoId = empresa['id_grupos'].toString();
-
           if (grupoNombre.isNotEmpty && grupoId.isNotEmpty) {
             if (!gruposUnicos.contains(grupoId)) {
               gruposUnicos.add(grupoId);
@@ -344,21 +257,16 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }
         }
-
-        // Guardamos grupos y empresas en Hive
         await HiveHelper.insertGrupos(gruposData);
         gruposData =
             gruposData.map((g) => Map<String, dynamic>.from(g)).toList();
         grupos = gruposData;
         gruposFiltrados = gruposData;
-
         await HiveHelper.insertEmpresas(empresasData);
         empresasData =
             empresasData.map((e) => Map<String, dynamic>.from(e)).toList();
         empresas = empresasData;
         empresasFiltradas = empresasData;
-
-        // Control de grupos expandibles
         _expandedGroups.clear();
         for (var g in grupos) {
           final gId = g['id']?.toString() ?? '';
@@ -366,21 +274,17 @@ class _HomeScreenState extends State<HomeScreen> {
             _expandedGroups[gId] = false;
           }
         }
-
         if (mounted) {
           setState(() {
             _isLoading = false;
             _filterData();
           });
         }
-
-        // Prefetch instalaciones en background
         _prefetchInstallationsInBackground();
       } else {
         throw Exception('Server error: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error updating server data: $e');
       _showErrorSnackBar('Error al actualizar datos del servidor');
       await _loadLocalData();
       if (mounted) {
@@ -392,28 +296,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ---------------------------------------------
-  // PREFETCH DE INSTALACIONES (SINCRONIZA EN BG)
-  // ---------------------------------------------
   Future<void> _prefetchInstallationsInBackground() async {
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       return;
     }
-
     List<Map<String, dynamic>> empresasSinInstalaciones = [];
     for (var empresa in empresas) {
       final eId = (empresa['id_empresas'] ?? '').toString();
       if (eId.isEmpty) continue;
-
       List<Map<String, dynamic>> instLocal = HiveHelper.getInstalaciones(eId);
       instLocal = instLocal.map((ee) => Map<String, dynamic>.from(ee)).toList();
-
       if (instLocal.isEmpty) {
         empresasSinInstalaciones.add(empresa);
       }
     }
-
     int batchSize = 5;
     for (int i = 0; i < empresasSinInstalaciones.length; i += batchSize) {
       final batch = empresasSinInstalaciones.skip(i).take(batchSize).toList();
@@ -426,15 +323,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Descarga e inserta instalaciones de una empresa específica
   Future<void> _fetchAndStoreInstalaciones(String empresaId) async {
     if (empresaId.isEmpty) return;
-
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       return;
     }
-
     try {
       final response = await dio.get(
         "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
@@ -446,7 +340,6 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         ),
       );
-
       if (response.statusCode == 200) {
         final responseData = response.data;
         final rawInst = responseData['data']['instalaciones'] ?? [];
@@ -454,81 +347,20 @@ class _HomeScreenState extends State<HomeScreen> {
             .map<Map<String, dynamic>>(
                 (inst) => Map<String, dynamic>.from(inst))
             .toList();
-
         instalacionesData = instalacionesData.where((inst) {
           return (inst['id_empresas']?.toString() ?? '') == empresaId;
         }).toList();
-
         if (instalacionesData.isNotEmpty) {
           await HiveHelper.insertInstalaciones(empresaId, instalacionesData);
         }
       }
-    } catch (e) {
-      print(
-          'Error fetching installations in background for empresa $empresaId: $e');
-    }
+    } catch (_) {}
   }
 
-  // ---------------------------------------------
-  // WIDGETS DE UI
-  // ---------------------------------------------
-  Widget _buildTipoClienteBadge(String tipoCliente) {
-    final text = (tipoCliente == 'directo') ? 'Integral' : 'Renting';
-    return Container(
-      decoration: BoxDecoration(
-        color: Color(0xFFE2EAFB),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontFamily: 'Montserrat',
-          fontSize: 11,
-          color: Color(0xFF2a3666),
-          fontWeight: FontWeight.w500,
-          decoration: TextDecoration.none,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmpresaAvatar(String? nombreEmpresa) {
-    String inicial = 'E';
-    if (nombreEmpresa != null && nombreEmpresa.isNotEmpty) {
-      inicial = nombreEmpresa[0].toUpperCase();
-    }
-    return CircleAvatar(
-      backgroundColor: Color(0xFF2a3666),
-      radius: 15,
-      child: Text(
-        inicial,
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: 18,
-          decoration: TextDecoration.none,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGrupoAvatar(String? nombreGrupo) {
-    String inicial = 'G';
-    if (nombreGrupo != null && nombreGrupo.isNotEmpty) {
-      inicial = nombreGrupo[0].toUpperCase();
-    }
-    return CircleAvatar(
-      backgroundColor: Color(0xFF2a3666),
-      radius: 15,
-      child: Text(
-        inicial,
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          decoration: TextDecoration.none,
-        ),
-      ),
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
     );
   }
 
@@ -547,17 +379,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
   }
 
-  // ---------------------------------------------
-  // GUARDAR id_empresas EN HIVE (box: id_empresas2)
-  // ---------------------------------------------
   Future<void> _saveIdEmpresasLocally(String idEmpresas) async {
     var box = await Hive.openBox('id_empresas2');
     await box.put('id_empresas_key', idEmpresas);
   }
 
-  // ---------------------------------------------
-  // BUILD
-  // ---------------------------------------------
   @override
   Widget build(BuildContext context) {
     List<Map<String, dynamic>> empresasSinGrupoFiltradas =
@@ -571,10 +397,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: Container(),
-      ),
+          backgroundColor: Colors.white, elevation: 0, title: Container()),
       body: _isLoading && empresas.isEmpty
           ? Center(
               child: CircularProgressIndicator(
@@ -661,6 +484,23 @@ class _HomeScreenState extends State<HomeScreen> {
                       for (var empresa in empresasSinGrupoFiltradas)
                         GestureDetector(
                           onTap: () async {
+                            if (!widget.puedeEntrarLupa) {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: Text('Atención'),
+                                  content: Text(
+                                      'No tienes permiso para acceder a Empresas.'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.of(ctx).pop(),
+                                      child: Text('OK'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              return;
+                            }
                             id_empresas =
                                 (empresa['id_empresas'] ?? '').toString();
                             await _saveIdEmpresasLocally(id_empresas);
@@ -698,7 +538,21 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             child: Row(
                               children: [
-                                _buildEmpresaAvatar(empresa['nombre']),
+                                CircleAvatar(
+                                  backgroundColor: Color(0xFF2a3666),
+                                  radius: 15,
+                                  child: Text(
+                                    (empresa['nombre']?[0] ?? 'E')
+                                        .toString()
+                                        .toUpperCase(),
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                      decoration: TextDecoration.none,
+                                    ),
+                                  ),
+                                ),
                                 SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
@@ -713,8 +567,26 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                                 SizedBox(width: 10),
-                                _buildTipoClienteBadge(
-                                    empresa['tipo_cliente'] ?? ''),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: Color(0xFFE2EAFB),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 1),
+                                  child: Text(
+                                    (empresa['tipo_cliente'] == 'directo')
+                                        ? 'Integral'
+                                        : 'Renting',
+                                    style: TextStyle(
+                                      fontFamily: 'Montserrat',
+                                      fontSize: 11,
+                                      color: Color(0xFF2a3666),
+                                      fontWeight: FontWeight.w500,
+                                      decoration: TextDecoration.none,
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -770,7 +642,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 child: Row(
                                   children: [
-                                    _buildGrupoAvatar(grupo['nombre']),
+                                    CircleAvatar(
+                                      backgroundColor: Color(0xFF2a3666),
+                                      radius: 15,
+                                      child: Text(
+                                        (grupo['nombre']?[0] ?? 'G')
+                                            .toString()
+                                            .toUpperCase(),
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          decoration: TextDecoration.none,
+                                        ),
+                                      ),
+                                    ),
                                     SizedBox(width: 10),
                                     Expanded(
                                       child: Text(
@@ -808,6 +693,24 @@ class _HomeScreenState extends State<HomeScreen> {
                                         (grupo['id'] ?? '').toString()))
                                       GestureDetector(
                                         onTap: () async {
+                                          if (!widget.puedeEntrarLupa) {
+                                            showDialog(
+                                              context: context,
+                                              builder: (ctx) => AlertDialog(
+                                                title: Text('Atención'),
+                                                content: Text(
+                                                    'No tienes permiso para acceder a Empresas.'),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.of(ctx).pop(),
+                                                    child: Text('OK'),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                            return;
+                                          }
                                           id_empresas =
                                               (emp['id_empresas'] ?? '')
                                                   .toString();
@@ -842,7 +745,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 BorderRadius.circular(8),
                                             boxShadow: [
                                               BoxShadow(
-                                                color: Colors.black,
+                                                color: Color.fromRGBO(
+                                                    0, 0, 0, 0.05),
                                                 blurRadius: 4,
                                                 offset: Offset(0, 2),
                                               ),
@@ -850,8 +754,22 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                           child: Row(
                                             children: [
-                                              _buildEmpresaAvatar(
-                                                  emp['nombre']),
+                                              CircleAvatar(
+                                                backgroundColor:
+                                                    Color(0xFF2a3666),
+                                                radius: 15,
+                                                child: Text(
+                                                  (emp['nombre']?[0] ?? 'E')
+                                                      .toString()
+                                                      .toUpperCase(),
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.bold,
+                                                    decoration:
+                                                        TextDecoration.none,
+                                                  ),
+                                                ),
+                                              ),
                                               SizedBox(width: 10),
                                               Expanded(
                                                 child: Text(
@@ -868,8 +786,29 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 ),
                                               ),
                                               SizedBox(width: 10),
-                                              _buildTipoClienteBadge(
-                                                  emp['tipo_cliente'] ?? ''),
+                                              Container(
+                                                decoration: BoxDecoration(
+                                                  color: Color(0xFFE2EAFB),
+                                                  borderRadius:
+                                                      BorderRadius.circular(20),
+                                                ),
+                                                padding: EdgeInsets.symmetric(
+                                                    horizontal: 6, vertical: 1),
+                                                child: Text(
+                                                  (emp['tipo_cliente'] ==
+                                                          'directo')
+                                                      ? 'Integral'
+                                                      : 'Renting',
+                                                  style: TextStyle(
+                                                    fontFamily: 'Montserrat',
+                                                    fontSize: 11,
+                                                    color: Color(0xFF2a3666),
+                                                    fontWeight: FontWeight.w500,
+                                                    decoration:
+                                                        TextDecoration.none,
+                                                  ),
+                                                ),
+                                              ),
                                             ],
                                           ),
                                         ),

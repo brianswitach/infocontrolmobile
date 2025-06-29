@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -9,6 +10,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
+//import './scanner_page.dart';
 
 // IMPORTAMOS LA PANTALLA DE LOGIN PARA FORZAR REAUTENTICACIÓN
 import 'login_screen.dart';
@@ -118,6 +120,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   // (para saber si está "Habilitado" o "Inhabilitado")
   String? contractorEstadoFromVehiculos;
 
+  int _jwtExp = 0; // marca de expiración en segundos desde epoch
+
+  bool _tokenIsAboutToExpire() {
+    if (_jwtExp == 0) return false; // aún no sabemos la expiración
+    final ahora = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return (_jwtExp - ahora) < 60; // faltan <60 s
+  }
+
   // ==================== CICLO DE VIDA ====================
   @override
   void initState() {
@@ -126,20 +136,69 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     bearerToken = widget.bearerToken;
 
+    try {
+      final payload = bearerToken.split('.')[1];
+      final decoded =
+          utf8.decode(base64Url.decode(base64Url.normalize(payload)));
+      final exp = jsonDecode(decoded)['exp'];
+      if (exp is int) _jwtExp = exp;
+    } catch (_) {}
+
     cookieJar = CookieJar();
     dio = Dio();
+    // ──────── INTERCEPTOR REFRESH + RETRY ────────
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        // antes de enviar el request
+        onRequest: (options, handler) async {
+          // ❶ refrescamos si está a punto de vencer
+          if (_tokenIsAboutToExpire()) {
+            final ok = await _refreshBearerTokenLupa();
+            if (!ok)
+              return handler.reject(DioException(
+                  requestOptions: options,
+                  error: 'No se pudo refrescar el token'));
+          }
+          // ❷ aseguramos header Authorization
+          options.headers['Authorization'] = 'Bearer $bearerToken';
+          return handler.next(options);
+        },
+
+        // si el backend de todos modos devolvió 401
+        onError: (e, handler) async {
+          if (e.response?.statusCode == 401) {
+            final ok = await _refreshBearerTokenLupa();
+            if (ok) {
+              // repetimos el request original
+              final retryResponse = await dio.request(
+                e.requestOptions.path,
+                data: e.requestOptions.data,
+                queryParameters: e.requestOptions.queryParameters,
+                options: Options(
+                  method: e.requestOptions.method,
+                  headers: e.requestOptions.headers,
+                ),
+              );
+              return handler.resolve(retryResponse);
+            }
+          }
+          return handler.next(e); // cualquier otro error
+        },
+      ),
+    );
+// ──────────────────────────────────────────────
+
     dio.interceptors.add(CookieManager(cookieJar));
 
     // **AGREGAMOS EL MANEJO AUTOMÁTICO DE COOKIES** (SIN SACAR NADA):
     cookieJar.saveFromResponse(
-      Uri.parse("https://www.infocontrol.tech"),
+      Uri.parse("https://www.infocontrol.tech/web"),
       [
         Cookie(
             'ci_session_infocontrolweb1', 'o564sc60v05mhvvdmpbekllq6chtjloq'),
         Cookie('cookie_sistema', '8433b356c97722102b7f142d8ecf9f8d'),
       ],
     );
-    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
     connectivity = Connectivity();
     connectivitySubscription =
@@ -168,7 +227,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             });
           } else {
             // CON CONEXIÓN
-            await _fetchAllEmployeesListarTest();
+
             await _fetchAllProveedoresListar();
             if (widget.openScannerOnInit) {
               _mostrarEscanerQR();
@@ -186,7 +245,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           setState(() {
             isLoading = true;
           });
-          await _fetchAllEmployeesListarTest();
+
           setState(() {
             isLoading = false;
           });
@@ -268,11 +327,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     );
   }
 
-  Future<void> _refreshBearerTokenLupa() async {
+  Future<bool> _refreshBearerTokenLupa() async {
+    // ── si no hay internet devolvemos false ───────────────────────────
     var connectivityResult = await connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       print('No hay conexión. No se puede refrescar el token en LupaEmpresa.');
-      return;
+      return false;
     }
 
     const int maxAttempts = 3;
@@ -304,24 +364,39 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             bearerToken = newToken;
           });
 
+          // ── ① SINCRONIZAMOS COOKIES DEVUELTAS ───────────────────────
+          if (response.headers.map['set-cookie'] != null) {
+            final uriBase = Uri.parse("https://www.infocontrol.tech/web");
+            final cookies = response.headers.map['set-cookie']!
+                .map((str) => Cookie.fromSetCookieValue(str))
+                .toList();
+            await cookieJar.saveFromResponse(uriBase, cookies);
+          }
+
+          // ── ② GUARDAMOS la expiración (campo exp del JWT) ───────────
+          try {
+            final payload = newToken.split('.')[1];
+            final decoded =
+                utf8.decode(base64Url.decode(base64Url.normalize(payload)));
+            final exp = jsonDecode(decoded)['exp'];
+            if (exp is int) _jwtExp = exp;
+          } catch (_) {}
+
           print('Token refrescado correctamente en LupaEmpresa: $newToken');
           success = true;
         } else {
-          throw Exception(
-              'Error al refrescar el token: ${response.statusCode}');
+          throw Exception('Error al refrescar token: ${response.statusCode}');
         }
       } catch (e) {
         attempt++;
         if (attempt < maxAttempts) {
-          // Espera incremental: 2 segundos en el primer fallo, 4 en el segundo, etc.
           await Future.delayed(Duration(seconds: 2 * attempt));
         }
       }
     }
 
-    if (!success) {
-      _logout();
-    }
+    if (!success) _logout();
+    return success; //  <<<<<<  ¡ahora devolvemos bool!
   }
 
   void _logout() {
@@ -335,7 +410,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   // ==================== DESCARGA Y GUARDADO DE EMPLEADOS ====================
   Future<void> _fetchAllEmployeesListarTest() async {
     setState(() {
-      isLoading = true;
+      isLoading = false;
     });
 
     final connectivityResult = await connectivity.checkConnectivity();
@@ -344,6 +419,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       setState(() {
         isLoading = false;
       });
+
       return;
     }
 
@@ -378,6 +454,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         setState(() {
           isLoading = false;
         });
+
         if (!mounted) return;
         Navigator.pushAndRemoveUntil(
           context,
@@ -389,6 +466,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       setState(() {
         isLoading = false;
       });
+
       if (!mounted) return;
 
       if (e.response?.statusCode == 401) {
@@ -408,6 +486,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       setState(() {
         isLoading = false;
       });
+
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
@@ -1760,169 +1839,290 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
   }
 
+  /// Intenta extraer el número de DNI de un PDF-417 peruano.
+  /// Devuelve `true` si reconoció algo y disparó la búsqueda.
+  bool _procesarDniPeruano(String raw) {
+    // Caso típico: campos separados por '@' y el DNI suele
+    // venir como cuarto o quinto segmento (8 dígitos).
+    if (raw.contains('@')) {
+      final partes = raw.split('@').where((p) => p.trim().isNotEmpty).toList();
+      for (final seg in partes) {
+        if (RegExp(r'^\d{8}$').hasMatch(seg)) {
+          print('🔎 PDF-417 detectado (Perú) — DNI: $seg'); // <-- NUEVA LÍNEA
+          personalIdController.text = seg; // 🔑 DNI
+          Future.delayed(const Duration(milliseconds: 300), _buscarPersonalId);
+          return true;
+        }
+      }
+    }
+
+    // Fallback: cualquier secuencia de 8-9 dígitos dentro del raw.
+    final match = RegExp(r'\d{8,9}').firstMatch(raw);
+    if (match != null) {
+      personalIdController.text = match.group(0)!;
+      Future.delayed(const Duration(milliseconds: 300), _buscarPersonalId);
+      return true;
+    }
+    return false; // no se reconoció
+  }
+
+  /// Intenta extraer OCR (13 dígitos) o CURP (18 alfanum.) de un PDF-417 de
+  /// la credencial INE (México). Devuelve `true` si reconoció algo y
+  /// dispara la búsqueda por INE.
+  bool _procesarInePdf417(String raw) {
+    // 1️⃣ Busca CURP (18 caracteres: 4 letras + 6 dígitos + 8 alfanum.)
+    final curpMatch = RegExp(r'[A-ZÑ]{4}\d{6}[A-Z0-9]{8}', caseSensitive: false)
+        .firstMatch(raw);
+    if (curpMatch != null) {
+      final curp = curpMatch.group(0)!;
+      personalIdController.text = curp;
+      Future.delayed(
+          const Duration(milliseconds: 300), () => _buscarEmpleadoPorIne(curp));
+      return true;
+    }
+
+    // 2️⃣ Si no hay CURP, intenta OCR (13 dígitos seguidos)
+    final ocrMatch = RegExp(r'\d{13}').firstMatch(raw);
+    if (ocrMatch != null) {
+      final ocr = ocrMatch.group(0)!;
+      personalIdController.text = ocr;
+      Future.delayed(
+          const Duration(milliseconds: 300), () => _buscarEmpleadoPorIne(ocr));
+      return true;
+    }
+
+    // Nada reconocido
+    return false;
+  }
+
   // ==================== ESCANEAR DNI ====================
   void _mostrarEscanerQR() {
+    final bool isCmpcPeru =
+        (widget.empresa['nombre'] ?? '').toString().trim().toLowerCase() ==
+            'cmpc perú';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (sheetCtx) {
-        // ► Cada vez que abres el modal creas un controlador NUEVO
-        final camController = MobileScannerController();
-        bool alreadyProcessed = false; // bandera local
+        final camController = MobileScannerController(
+          autoStart: true,
+          facing: CameraFacing.back,
+          detectionTimeoutMs: 250,
+          detectionSpeed: DetectionSpeed.normal,
+          returnImage: true,
+          formats: [
+            BarcodeFormat.qrCode,
+            BarcodeFormat.pdf417,
+            BarcodeFormat.code128,
+            BarcodeFormat.code39,
+            BarcodeFormat.code93,
+            BarcodeFormat.ean13,
+            BarcodeFormat.ean8,
+            BarcodeFormat.upcA,
+            BarcodeFormat.upcE,
+            BarcodeFormat.itf,
+          ],
+        );
+
+        bool alreadyProcessed = false;
+
+        // ─── Aviso luego de 7 s si no se leyó nada ───────────────────────────
+        Timer(const Duration(seconds: 7), () {
+          if (!alreadyProcessed && sheetCtx.mounted) {
+            final overlay = Overlay.of(sheetCtx);
+            if (overlay == null) return;
+
+            final entry = OverlayEntry(
+              builder: (_) => Positioned(
+                top: MediaQuery.of(sheetCtx).padding.top +
+                    60, // un poco más abajo
+                left: 0,
+                right: 0,
+                child: Material(
+                  color: Colors.transparent,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 6, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'Recomendamos acercar el documento y mantener una buena iluminacion para una mejor lectura.',
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+
+            overlay.insert(entry);
+            Future.delayed(const Duration(seconds: 6), entry.remove);
+          }
+        });
+// ──────────────────────────────────────────────────────────────────────
 
         return SizedBox(
           height: MediaQuery.of(sheetCtx).size.height * 0.8,
-          child: Column(
+          child: Stack(
             children: [
-              AppBar(
-                backgroundColor: const Color(0xFF2a3666),
-                title: const Text(
-                  'Escanear DNI',
-                  style:
-                      TextStyle(fontFamily: 'Montserrat', color: Colors.white),
-                ),
-                leading: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white),
-                  onPressed: () => Navigator.pop(sheetCtx),
-                ),
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.flash_on, color: Colors.white),
-                    onPressed: () => camController.toggleTorch(),
+              Column(
+                children: [
+                  AppBar(
+                    backgroundColor: const Color(0xFF2a3666),
+                    title: const Text(
+                      'Escanear QR',
+                      style: TextStyle(
+                          fontFamily: 'Montserrat', color: Colors.white),
+                    ),
+                    leading: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.flash_on, color: Colors.white),
+                        onPressed: () => camController.toggleTorch(),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.flip_camera_android,
+                            color: Colors.white),
+                        onPressed: () => camController.switchCamera(),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.flip_camera_android,
-                        color: Colors.white),
-                    onPressed: () => camController.switchCamera(),
+                  Expanded(
+                    child: MobileScanner(
+                      controller: camController,
+                      onDetect: (capture) async {
+                        if (alreadyProcessed || capture.barcodes.isEmpty)
+                          return;
+
+                        final barcode = capture.barcodes.first;
+                        final String rawVal = barcode.rawValue ?? '';
+                        print(
+                            '🆗 Barcode recibido: ${barcode.format} → $rawVal');
+
+                        bool isRecognized = false;
+
+                        if (rawVal.contains('registrocivil.cl') &&
+                            rawVal.contains('RUN=')) {
+                          Uri? uri = Uri.tryParse(rawVal);
+                          if (uri != null) {
+                            String? run = uri.queryParameters['RUN'];
+                            if (run != null && run.isNotEmpty) {
+                              personalIdController.text =
+                                  run.replaceAll('-', '');
+                              isRecognized = true;
+                              Future.delayed(const Duration(milliseconds: 300),
+                                  _buscarPersonalId);
+                            }
+                          }
+                        } else if (barcode.format == BarcodeFormat.pdf417) {
+                          // Primero intentamos el formato peruano; si falla, probamos INE (México)
+                          if (_procesarDniPeruano(rawVal) ||
+                              _procesarInePdf417(rawVal)) {
+                            isRecognized = true;
+                          }
+                          /* ─────────── Code 128 y Code 39 ─────────── */
+                        } else if (barcode.format == BarcodeFormat.code128) {
+                          // ① Guardamos lo que venga, sin filtros
+                          personalIdController.text = rawVal;
+                          isRecognized = true;
+
+                          // ② Si son 8-9 dígitos => DNI; cualquier otra cosa => INE/Genérico
+                          if (RegExp(r'^\d{8,9}$').hasMatch(rawVal)) {
+                            Future.delayed(const Duration(milliseconds: 300),
+                                _buscarPersonalId);
+                          } else {
+                            Future.delayed(const Duration(milliseconds: 300),
+                                () => _buscarEmpleadoPorIne(rawVal));
+                          }
+
+/*  ── mantenemos la lógica antigua SOLO para Code 39 numérico ── */
+                        } else if (barcode.format == BarcodeFormat.code39 &&
+                            RegExp(r'^\d{8,9}$').hasMatch(rawVal)) {
+                          personalIdController.text = rawVal;
+                          isRecognized = true;
+                          Future.delayed(const Duration(milliseconds: 300),
+                              _buscarPersonalId);
+                        } else if (rawVal.contains('qr.ine.mx')) {
+                          Uri? uri = Uri.tryParse(rawVal);
+                          if (uri != null && uri.host == 'qr.ine.mx') {
+                            final segments = uri.path
+                                .split('/')
+                                .where((s) => s.trim().isNotEmpty)
+                                .toList();
+                            String? ocrPath =
+                                segments.isNotEmpty ? segments[0].trim() : null;
+
+                            final ocrParam = uri.queryParameters['ocr'] ??
+                                uri.queryParameters['OCR'];
+                            final curpParam = uri.queryParameters['curp'] ??
+                                uri.queryParameters['CURP'];
+
+                            final String valorIne =
+                                (ocrPath != null && ocrPath.isNotEmpty)
+                                    ? ocrPath
+                                    : (ocrParam != null && ocrParam.isNotEmpty)
+                                        ? ocrParam
+                                        : (curpParam ?? '');
+
+                            if (valorIne.isNotEmpty) {
+                              personalIdController.text = valorIne;
+                              isRecognized = true;
+                              Future.delayed(const Duration(milliseconds: 300),
+                                  () => _buscarEmpleadoPorIne(valorIne));
+                            }
+                          }
+                        } else {
+                          try {
+                            final decoded = jsonDecode(rawVal);
+                            if (decoded is Map<String, dynamic>) {
+                              switch (decoded['entidad']) {
+                                case 'empleado':
+                                  personalIdController.text =
+                                      (decoded['dni'] ?? '').toString();
+                                  isRecognized = true;
+                                  Future.delayed(
+                                      const Duration(milliseconds: 300),
+                                      _buscarPersonalId);
+                                  break;
+                                case 'vehiculo':
+                                  dominioController.text =
+                                      (decoded['dominio'] ?? '').toString();
+                                  isRecognized = true;
+                                  Future.delayed(
+                                      const Duration(milliseconds: 300),
+                                      _buscarDominio);
+                                  break;
+                              }
+                            }
+                          } catch (_) {}
+                        }
+
+                        if (isRecognized) {
+                          alreadyProcessed = true;
+                          await camController.stop();
+                          if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                          if (mounted) setState(() => qrScanned = true);
+                        }
+                      },
+                    ),
                   ),
                 ],
               ),
-
-              // ---------------- VIDEO + DECODIFICACIÓN ----------------
-              Expanded(
-                child: MobileScanner(
-                  controller: camController,
-                  onDetect: (capture) async {
-                    // Evitamos procesar más de una vez
-                    if (alreadyProcessed) return;
-
-                    final barcodes = capture.barcodes;
-                    if (barcodes.isEmpty) return;
-
-                    final String codigoLeido = barcodes.first.rawValue ?? '';
-                    bool isRecognized = false;
-
-                    // ===== 1) DNI chileno (Registro Civil) =====
-                    if (codigoLeido.contains('registrocivil.cl') &&
-                        codigoLeido.contains('RUN=')) {
-                      Uri? uri = Uri.tryParse(codigoLeido);
-                      if (uri != null) {
-                        String? runParam = uri.queryParameters['RUN'];
-                        if (runParam != null && runParam.isNotEmpty) {
-                          final processedRun = runParam.replaceAll('-', '');
-                          personalIdController.text = processedRun;
-                          isRecognized = true;
-                          // disparamos búsqueda después de un pequeño delay
-                          Future.delayed(const Duration(milliseconds: 300), () {
-                            _buscarPersonalId();
-                          });
-                        }
-                      }
-                    }
-
-                    // ===== 2) Credencial INE (México) =====
-                    else if (codigoLeido.contains('qr.ine.mx')) {
-                      Uri? uri = Uri.tryParse(codigoLeido);
-
-                      // Comprobamos que realmente sea del dominio INE
-                      if (uri != null && uri.host == 'qr.ine.mx') {
-                        /* --------------------------------------------------------------
-     * Formato típico:
-     *   https://qr.ine.mx/<OCR>/<FECHA>/P/<FOLIO>
-     * Ahora queremos <OCR>  →  primer segmento del path
-     * -------------------------------------------------------------*/
-
-                        // 1️⃣ Dividimos el path y limpiamos posibles “/” vacíos
-                        final segments = uri.path
-                            .split('/')
-                            .where((s) => s.trim().isNotEmpty)
-                            .toList(); //  ["2490107…","20161027","P","001436"]
-
-                        // 2️⃣ Tomamos el PRIMER segmento (OCR completo)
-                        String? ocrFromPath;
-                        if (segments.isNotEmpty) {
-                          ocrFromPath =
-                              segments[0].trim(); // "249010728210600153126452"
-                        }
-
-                        // 3️⃣ Compatibilidad: si algo saliera mal, probamos ?ocr= o ?curp=
-                        final ocrParam = uri.queryParameters['ocr'] ??
-                            uri.queryParameters['OCR'];
-                        final curpParam = uri.queryParameters['curp'] ??
-                            uri.queryParameters['CURP'];
-
-                        final String valorINE =
-                            (ocrFromPath != null && ocrFromPath.isNotEmpty)
-                                ? ocrFromPath
-                                : (ocrParam != null && ocrParam.isNotEmpty)
-                                    ? ocrParam
-                                    : (curpParam ?? '');
-
-                        // 4️⃣ Si tenemos un valor, lo ponemos en el TextField y disparamos la búsqueda
-                        if (valorINE.isNotEmpty) {
-                          personalIdController.text = valorINE;
-                          isRecognized = true;
-
-                          Future.delayed(const Duration(milliseconds: 300), () {
-                            _buscarEmpleadoPorIne(valorINE);
-                            //  _buscarPersonalId(); // continúa el flujo normal (modal, etc.)
-                          });
-                        }
-                      }
-                    }
-
-                    // ===== 3) Códigos QR propios en JSON =====
-                    else {
-                      try {
-                        final decoded = jsonDecode(codigoLeido);
-                        if (decoded is Map<String, dynamic>) {
-                          final entidad = decoded['entidad'];
-                          if (entidad == 'empleado') {
-                            final dni = decoded['dni'] ?? '';
-                            personalIdController.text = dni.toString();
-                            isRecognized = true;
-                            Future.delayed(const Duration(milliseconds: 300),
-                                () {
-                              _buscarPersonalId();
-                            });
-                          } else if (entidad == 'vehiculo') {
-                            final dom = decoded['dominio'] ?? '';
-                            dominioController.text = dom.toString();
-                            isRecognized = true;
-                            Future.delayed(const Duration(milliseconds: 300),
-                                () {
-                              _buscarDominio();
-                            });
-                          }
-                        }
-                      } catch (_) {
-                        // no es JSON → se ignora
-                      }
-                    }
-
-                    // ===== 4) Resultado final =====
-                    if (isRecognized) {
-                      alreadyProcessed = true; // bloquea re‑escaneos
-                      await camController.stop(); // libera la cámara
-                      if (sheetCtx.mounted)
-                        Navigator.pop(sheetCtx); // cierra modal
-                      if (mounted)
-                        setState(
-                            () => qrScanned = true); // cambia texto del botón
-                    }
-                  },
+              if (isCmpcPeru)
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                        bottom: 12.0, left: 24.0, right: 24.0),
+                  ),
                 ),
-              ),
             ],
           ),
         );
@@ -2062,7 +2262,55 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           content: SingleChildScrollView(
             child: Column(
               children: [
-                Image.asset('assets/generic.jpg', width: 80, height: 80),
+                FutureBuilder<Uint8List?>(
+                  future: _fetchEmpleadoImageFromDetalle(idEntidad),
+                  builder: (ctx, snap) {
+                    // Mientras llega la respuesta
+                    if (snap.connectionState != ConnectionState.done) {
+                      return SizedBox(
+                        width: 80,
+                        height: 80,
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    // Si hubo un error en la petición o decodificación
+                    if (snap.hasError) {
+                      return SizedBox(
+                        width: 80,
+                        height: 80,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.error, color: Colors.red, size: 32),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Error:\n${snap.error}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 10),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    // Si no trae imagen en base64, muestro placeholder
+                    final bytes = snap.data;
+                    if (bytes == null) {
+                      return Image.asset(
+                        'assets/generic.jpg',
+                        width: 80,
+                        height: 80,
+                        fit: BoxFit.cover,
+                      );
+                    }
+                    // Imagen decodificada correctamente
+                    return Image.memory(
+                      bytes,
+                      width: 130,
+                      height: 130,
+                      fit: BoxFit.cover,
+                    );
+                  },
+                ),
                 const SizedBox(height: 16),
                 Container(
                   padding:
@@ -2159,58 +2407,69 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     );
   }
 
+  // ===== POST en JSON (sin multipart) =====
   Future<Response> _makePostRequest(
       String url, Map<String, dynamic> data) async {
-    // Convertimos el map a FormData
-    final formData = FormData.fromMap(data);
-
     return await dio.post(
       url,
-      data: formData,
+      data: jsonEncode(data),
       options: Options(
         headers: {
           'Authorization': 'Bearer $bearerToken',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        contentType: 'multipart/form-data', // Importante
       ),
     );
   }
 
-  // ==================== DEMO (PRÓXIMAMENTE) ====================
-  void _mostrarProximamente() {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text(
-            'Próximamente',
-            style: TextStyle(fontFamily: 'Montserrat'),
-          ),
-          content: const Text(
-            'Esta funcionalidad estará disponible próximamente.',
-            style: TextStyle(fontFamily: 'Montserrat'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text(
-                'OK',
-                style: TextStyle(fontFamily: 'Montserrat'),
-              ),
-            ),
-          ],
-        );
-      },
-    );
+  Future<Map<String, dynamic>?> _fetchEmpleadoDetalle(String idEntidad) async {
+    try {
+      final resp = await dio.get(
+        'https://www.infocontrol.tech/web/api/mobile/empleados/ObtenerEmpleado',
+        queryParameters: {'id_empleados': idEntidad},
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $bearerToken',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+      print('ObtenerEmpleado código: ${resp.statusCode}');
+      print('ObtenerEmpleado respuesta completa: ${resp.data}');
+      if (resp.statusCode == 200) {
+        return resp.data['data'] as Map<String, dynamic>;
+      }
+    } catch (e) {
+      print('Error ObtenerEmpleado: $e');
+    }
+    return null;
+  }
+
+  /// Devuelve los bytes de la imagen que viene en imagen_array (Base64),
+  /// o `null` si no hay nada.
+  Future<Uint8List?> _fetchEmpleadoImageFromDetalle(String idEntidad) async {
+    final detalleRoot = await _fetchEmpleadoDetalle(idEntidad);
+    // Ahora extraemos primero data_empleado:
+    final dataEmp = detalleRoot?['data_empleado'] as Map<String, dynamic>?;
+
+    // Luego sacamos el campo imagen_array de ahí:
+    final raw = dataEmp?['imagen_array']?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+
+    try {
+      return base64Decode(raw);
+    } catch (e) {
+      // Si falla la decodificación, lo veremos en consola:
+      print('❌ Error decodificando imagen Base64: $e');
+      return null;
+    }
   }
 
   // ==================== BUILD ====================
   @override
   Widget build(BuildContext context) {
-    String botonQrText = qrScanned ? "Escanear dni nuevamente" : "Escanear dni";
+    String botonQrText = qrScanned ? "Escanear qr nuevamente" : "Escanear qr";
 
     List<String> contractorItems = _getContractorsForDropdown();
     bool isContratistaHabilitado = false;
@@ -2583,7 +2842,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton(
-                                  onPressed: _mostrarProximamente,
+                                  onPressed: null,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.grey[300],
                                     padding: const EdgeInsets.symmetric(
@@ -2718,14 +2977,60 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                             children: [
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: () {
-                                    _filtrarEmpleadosDeContratista();
+                                  onPressed: () async {
+                                    if (selectedContractor == null ||
+                                        selectedContractor!.isEmpty) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                              'Debes elegir un contratista'),
+                                          backgroundColor: Colors.red,
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    // overlay “Cargando…”
+                                    showDialog(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder: (ctx) => Center(
+                                        child: Container(
+                                          padding: const EdgeInsets.all(20),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: const [
+                                              CircularProgressIndicator(),
+                                              SizedBox(width: 16),
+                                              Text('Cargando...',
+                                                  style: TextStyle(
+                                                      fontFamily: 'Montserrat',
+                                                      color: Colors.black,
+                                                      decoration:
+                                                          TextDecoration.none,
+                                                      fontSize: 16)),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    );
+
+                                    try {
+                                      await _fetchAllEmployeesListarTest(); // ya no redibuja la pantalla
+                                    } finally {
+                                      if (context.mounted)
+                                        Navigator.pop(
+                                            context); // cierra el overlay
+                                    }
+
+                                    _filtrarEmpleadosDeContratista(); // muestra la lista
                                   },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.grey[200],
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
-                                  ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: const [
@@ -2893,29 +3198,6 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // IMPRIMIR
-                          Center(
-                            child: ElevatedButton(
-                              onPressed: _mostrarProximamente,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.grey[300],
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 24, vertical: 12),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.print, color: Colors.black54),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Imprimir',
-                                    style: TextStyle(color: Colors.black54),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-
                           // LISTA DE EMPLEADOS
                           if (showEmployees) ...[
                             const SizedBox(height: 30),
@@ -3025,10 +3307,31 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                             ),
                                           ),
                                         ),
+                                        // → Dentro de tu ListView / Column, en lugar del onPressed anterior:
                                         ElevatedButton(
-                                          onPressed: () =>
-                                              _showEmpleadoDetailsModal(
-                                                  empleado),
+                                          onPressed: () async {
+                                            // 1) Obtenemos el id de la entidad
+                                            final idEntidad =
+                                                empleado['id_entidad']
+                                                        ?.toString() ??
+                                                    '';
+                                            if (idEntidad.isEmpty) return;
+
+                                            // 2) Llamamos al servicio y lo imprimimos por consola
+                                            try {
+                                              final detalle =
+                                                  await _fetchEmpleadoDetalle(
+                                                      idEntidad);
+                                              print(
+                                                  'Detalle en background: $detalle');
+                                            } catch (e) {
+                                              print(
+                                                  'Error en background ObtenerEmpleado: $e');
+                                            }
+
+                                            // 3) Abrimos el modal con los datos que ya tenías
+                                            _showEmpleadoDetailsModal(empleado);
+                                          },
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor:
                                                 const Color(0xFF43b6ed),
