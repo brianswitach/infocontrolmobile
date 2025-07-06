@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -10,6 +9,8 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart'; // ← necesario para compute
+
 //import './scanner_page.dart';
 
 // IMPORTAMOS LA PANTALLA DE LOGIN PARA FORZAR REAUTENTICACIÓN
@@ -43,6 +44,11 @@ class LupaEmpresaScreen extends StatefulWidget {
 
   @override
   _LupaEmpresaScreenState createState() => _LupaEmpresaScreenState();
+}
+
+List<dynamic> parseEmployeesJson(Map<String, dynamic> raw) {
+  // raw es resp.data (ya Map) => extraemos 'data'
+  return (raw['data'] as List<dynamic>?) ?? <dynamic>[];
 }
 
 //bool _alreadyProcessed = false;
@@ -90,6 +96,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   final TextEditingController searchControllerVeh = TextEditingController();
 
   bool qrScanned = false;
+  bool _prefetchDone = false; // <- NUEVO, queda con las otras flags
   bool? resultadoHabilitacion;
 
   late Dio dio;
@@ -229,6 +236,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             // CON CONEXIÓN
 
             await _fetchAllProveedoresListar();
+            // -------------- PREFETCH SILENCIOSO --------------
+            _silentPreFetchEmployees(); // no await → corre en background
+// -
             if (widget.openScannerOnInit) {
               _mostrarEscanerQR();
             }
@@ -265,6 +275,34 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimerLupa?.cancel();
     super.dispose();
+  }
+
+  Future<void> _silentPreFetchEmployees() async {
+    if (_prefetchDone) return; // ya lo hiciste
+    final conn = await connectivity.checkConnectivity();
+    if (conn == ConnectivityResult.none) return; // sin red, salimos
+
+    try {
+      final resp = await _makeGetRequest(
+        'https://www.infocontrol.tech/web/api/mobile/empleados/listartest',
+        queryParameters: {'id_empresas': widget.empresaId},
+      );
+      if ((resp.statusCode ?? 0) == 200) {
+        // • Parseamos en isolate para no freeze-ar la UI
+        final lista = await compute<Map<String, dynamic>, List<dynamic>>(
+          parseEmployeesJson,
+          resp.data as Map<String, dynamic>,
+        );
+        // • Guardamos en memoria y en Hive
+        allEmpleadosListarTest = lista;
+        employeesBox?.put('all_employees', lista);
+        _prefetchDone = true;
+        debugPrint(
+            '✅ Prefetch silencioso completado (${lista.length} registros)');
+      }
+    } catch (e) {
+      debugPrint('❌ Prefetch falló: $e');
+    }
   }
 
   // ==================== HIVE CONFIG ====================
@@ -437,7 +475,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         'https://www.infocontrol.tech/web/api/mobile/empleados/listartest',
         queryParameters: params,
       );
-
+      print('Respuesta completa empleados/listar: ${response.data}');
       final statusCode = response.statusCode ?? 0;
 
       if (statusCode == 200) {
@@ -897,6 +935,23 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       return;
     }
 
+    // 0️⃣ Intento rápido usando la lista que ya está en memoria/Hive
+    final localMatch = allEmpleadosListarTest.firstWhere(
+      (emp) {
+        final dni = emp['valor']?.toString().trim();
+        final cuit = emp['cuit']?.toString().trim();
+        final cuil = emp['cuil']?.toString().trim();
+        final ine = emp['ine']?.toString().trim(); // para credencial INE
+        return texto == dni || texto == cuit || texto == cuil || texto == ine;
+      },
+      orElse: () => null,
+    );
+
+    if (localMatch != null) {
+      _showEmpleadoDetailsModal(localMatch); // 👉 abre el modal sin ir a la red
+      return; // ⬅️ salimos del método aquí
+    }
+
     // Loading
     showDialog(
       context: context,
@@ -929,16 +984,21 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     );
 
     try {
-      final Map<String, dynamic> params = {
-        'id_empresas': widget.empresaId,
-      };
-      if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
+      final Map<String, dynamic> params = {};
+      if (selectedContractorId == null || selectedContractorId!.isEmpty) {
+        // ① Sin contratista ⇒ mandamos solo el CUIL
+        params['cuil'] = texto;
+      } else {
+        // ② Con contratista ⇒ mandamos empresa + proveedor
+        params['id_empresas'] = widget.empresaId;
         params['id_proveedores'] = selectedContractorId!;
       }
       final response = await _makeGetRequest(
         "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
         queryParameters: params,
       );
+      print(
+          'Respuesta completa empleados/listar (buscarPersonalId): ${response.data}');
 
       Navigator.pop(context);
       final statusCode = response.statusCode ?? 0;
@@ -946,6 +1006,30 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       if (statusCode == 200) {
         final responseData = response.data;
         List<dynamic> employeesData = responseData['data'] ?? [];
+        if (responseData['data'] is Map &&
+            responseData['data']['data_empleado'] != null) {
+          final Map<String, dynamic> empDet =
+              responseData['data']['data_empleado'];
+
+          // 1. Tomamos el ID y lo guardamos TAMBIÉN como id_entidad
+          final String idEmp = empDet['id_empleados'] ?? '';
+          empDet['id_entidad'] = idEmp; // ← CLAVE NUEVA
+
+          // 2. Pegamos a action_resource
+          if (idEmp.isNotEmpty) {
+            final dataResource = await _fetchActionResourceData(idEmp);
+            print('Respuesta completa ActionResource (CUIL): $dataResource');
+
+            // (opcional) guardamos el estado para la lista
+            empDet['estado'] = dataResource['estado'] ?? 'Desconocido';
+          }
+
+          // 3. Mostramos el modal
+          _showEmpleadoDetailsModal(empDet);
+          return; // ⬅️ evita la rama “lista”
+        }
+
+// ─────────────────────────────────────────────────────────────────────────────
 
         final String dniIngresado = texto;
         final foundEmployee = employeesData.firstWhere((emp) {
@@ -1331,8 +1415,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   // ==================== MOSTRAR DETALLES DEL VEHÍCULO ====================
   Future<void> _showVehiculoDetailsModal(dynamic vehiculo) async {
-    final estado = (vehiculo['estado']?.toString().trim() ?? '').toLowerCase();
-    final bool isVehiculoHabilitado = (estado == 'habilitado');
+    // --- Estado real vía action_resource ---
+    final Map<String, dynamic> dataResourceVeh =
+        await _fetchActionResourceVehicle(vehiculo['id_entidad']);
+
+    final String estadoResource =
+        (dataResourceVeh['estado']?.toString().trim() ?? '').toLowerCase();
+
+    final bool isVehiculoHabilitado = estadoResource == 'habilitado';
 
     // 1) Verificamos si el campo "valor" (dominio) está vacío o no
     final String dominio = vehiculo['valor']?.toString().trim() ?? '';
@@ -1354,8 +1444,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     if (connectivityResult == ConnectivityResult.none) {
       // ESTAMOS OFFLINE => cargamos la última acción conocida (si existe)
       final lastAction = _getLastActionVehicle(vehiculo['id_entidad']);
-      if (lastAction == 'REGISTRAR INGRESO' ||
-          lastAction == 'REGISTRAR EGRESO') {
+      if (lastAction == 'Registrar Ingreso' ||
+          lastAction == 'Registrar Egreso') {
         // Mostramos el botón con la última acción conocida
         vehiculoBtnText = lastAction;
         showVehiculoActionButton = true;
@@ -1365,46 +1455,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         showVehiculoActionButton = true;
       }
     } else {
-      // HAY CONEXIÓN => pedimos la acción al servidor
-      try {
-        final Map<String, dynamic> postData = {
-          'id_entidad': vehiculo['id_entidad'],
-          'id_usuarios': hiveIdUsuarios,
-          'tipo_entidad': 'vehiculo',
-        };
+      final String messageFromResource =
+          dataResourceVeh['message']?.toString().trim() ?? '';
 
-        final response = await dio.post(
-          "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
-          data: jsonEncode(postData),
-          options: Options(
-            headers: {
-              'Authorization': 'Bearer $bearerToken',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-          ),
-        );
+      vehiculoBtnText = (messageFromResource == 'REGISTRAR INGRESO')
+          ? 'Registrar Ingreso'
+          : 'Registrar Egreso';
 
-        final dynamic fullData = response.data;
-        final dynamic dataInside = fullData['data'] ?? {};
-        final String messageFromResource =
-            dataInside['message']?.toString().trim() ?? '';
-
-        if (messageFromResource.toUpperCase() == "REGISTRAR INGRESO") {
-          vehiculoBtnText = "Registrar Ingreso";
-          showVehiculoActionButton = true;
-          _setLastActionVehicle(vehiculo['id_entidad'], "Registrar Ingreso");
-        } else if (messageFromResource.toUpperCase() == "REGISTRAR EGRESO") {
-          vehiculoBtnText = "Registrar Egreso";
-          showVehiculoActionButton = true;
-          _setLastActionVehicle(vehiculo['id_entidad'], "Registrar Egreso");
-        }
-      } catch (e) {
-        print("Error al consultar action_resource para vehiculo: $e");
-        // Si hay algún error, podrías asignar por defecto "Registrar Ingreso"
-        // o no mostrar el botón, depende de tu preferencia
-      }
-    }
+      showVehiculoActionButton = true;
+      _setLastActionVehicle(vehiculo['id_entidad'], vehiculoBtnText);
+    } // cierre del else
 
     showDialog(
       context: context,
@@ -1423,7 +1483,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    isVehiculoHabilitado ? 'HABILITADO' : 'INHABILITADO',
+                    estadoResource.toUpperCase(),
                     style: const TextStyle(
                       fontFamily: 'Montserrat',
                       fontSize: 16,
@@ -2147,38 +2207,70 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   // ==================== ACTION_RESOURCE (para saber si registrar IN/OUT) (Empleados) ====================
   Future<Map<String, dynamic>> _fetchActionResourceData(
       String idEntidad) async {
+    final postData = {
+      "id_entidad": idEntidad,
+      "id_usuarios": hiveIdUsuarios, // <- tu usuario logueado
+      "tipo_entidad": "empleado", // <- fijo para empleados
+    };
+
     try {
-      final postData = {
-        "id_entidad": idEntidad,
-        "id_usuarios": hiveIdUsuarios,
-        "tipo_entidad": "empleado",
-      };
-
-      print("==> ACTION_RESOURCE param: $postData");
-
       final response = await _makePostRequest(
         "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
         postData,
       );
 
+      // 🔸 IMPRIMIMOS SIEMPRE, venga el código que venga
+      print('ACTION_RESOURCE status: ${response.statusCode}');
+      print('ACTION_RESOURCE body  : ${response.data}');
+
       if ((response.statusCode ?? 0) == 200) {
-        debugPrint(jsonEncode(response.data));
         final respData = response.data ?? {};
-        final data = respData['data'] ?? {};
-        return data;
+        return respData['data'] ?? {};
       } else {
-        return {};
+        return {}; // devolvés vacío para no romper el flujo
       }
-    } catch (e) {
+    } catch (e, st) {
+      // Si hay un error de red/Dio también lo mostramos
+      print('ACTION_RESOURCE exception: $e');
+      print(st);
       return {};
     }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> _fetchActionResourceVehicle(
+      String idEntidad) async {
+    final postData = {
+      "id_entidad": idEntidad,
+      "id_usuarios": hiveIdUsuarios,
+      "tipo_entidad": "vehiculo", // 👈🏻 clave
+    };
+
+    try {
+      final response = await _makePostRequest(
+        "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
+        postData,
+      );
+
+      print('ACTION_RESOURCE VEH status: ${response.statusCode}');
+      print('ACTION_RESOURCE VEH body  : ${response.data}');
+
+      if ((response.statusCode ?? 0) == 200) {
+        return (response.data['data'] ?? {}) as Map<String, dynamic>;
+      }
+    } catch (e, st) {
+      print('ACTION_RESOURCE VEH exception: $e');
+      print(st);
+    }
+    return {}; // fallback
+  }
+// ────────────────────────────────────────────────────────────────
+
   // ==================== MOSTRAR DETALLES DEL EMPLEADO ====================
   Future<void> _showEmpleadoDetailsModal(dynamic empleado) async {
     // Obtenemos el estado del empleado
-    final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
-    final bool isHabilitado = estado == 'habilitado';
+    //  final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
+    //  final bool isHabilitado = estado == 'habilitado';
 
     // Extraemos datos del empleado (nombre, apellido, dni)
     final datosString = empleado['datos']?.toString() ?? '';
@@ -2215,12 +2307,19 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     // Obtenemos el id de la entidad
     final String idEntidad = empleado['id_entidad'] ?? 'NO DISPONIBLE';
+
+    // ── Nuevo: pido el estado real al endpoint
+    final dataResource = await _fetchActionResourceData(idEntidad);
+    final String estadoResource =
+        (dataResource['estado']?.toString().trim() ?? '');
+    final bool isHabilitado = estadoResource.toLowerCase() == 'habilitado';
+
     // Usamos el estado interno para un fallback inicial
     bool isInside = employeeInsideStatus[idEntidad] ?? false;
     String buttonText = isInside ? 'Marcar egreso' : 'Marcar ingreso';
 
     // ===================== FORZAR: CONSULTA AL SERVIDOR ANTES DE ABRIR EL MODAL =====================
-    final dataResource = await _fetchActionResourceData(idEntidad);
+    // final dataResource = await _fetchActionResourceData(idEntidad);
     final String actionMessage =
         dataResource['message']?.toString().trim() ?? '';
 
@@ -2320,7 +2419,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    isHabilitado ? 'HABILITADO' : 'INHABILITADO',
+                    estadoResource.toUpperCase(),
                     style: const TextStyle(
                       fontFamily: 'Montserrat',
                       fontSize: 16,
