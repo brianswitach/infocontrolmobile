@@ -149,7 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
     while (attempt < maxAttempts && !success) {
       try {
         final response = await dio.post(
-          "https://www.infocontrol.tech/web/api/mobile/service/login",
+          "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/service/login",
           options: Options(
             headers: {
               'Content-Type': 'application/json',
@@ -224,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       final response = await dio.get(
-        "https://www.infocontrol.tech/web/api/mobile/empresas/listar",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/listar",
         options: Options(
           headers: {
             'Content-Type': 'application/json',
@@ -331,7 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     try {
       final response = await dio.get(
-        "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
         options: Options(
           headers: {
             'Content-Type': 'application/json',

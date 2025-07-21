@@ -157,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     String loginUrl =
-        "https://www.infocontrol.tech/web/api/mobile/service/login";
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/service/login";
     String username = _usernameController.text.trim();
     String password = _passwordController.text.trim();
     String basicAuth =
@@ -301,7 +301,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> sendRequest() async {
     String listarUrl =
-        "https://www.infocontrol.tech/web/api/mobile/empresas/listar";
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/listar";
 
     try {
       final response = await dio.get(
@@ -355,7 +355,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _launchForgotPassword() async {
     final url =
-        'https://www.infocontrol.tech/web/web/usuarios/recuperar_contrasena?lg=arg';
+        'https://www.infocontrol.com.ar/desarrollo_v2/web/usuarios/recuperar_contrasena?lg=arg';
     await _launchURL(url);
   }
 

@@ -293,7 +293,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final resp = await _makeGetRequest(
-        'https://www.infocontrol.tech/web/api/mobile/empleados/listartest',
+        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest',
         queryParameters: {'id_empresas': widget.empresaId},
       );
       if ((resp.statusCode ?? 0) == 200) {
@@ -389,7 +389,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     while (attempt < maxAttempts && !success) {
       try {
         final response = await dio.post(
-          "https://www.infocontrol.tech/web/api/mobile/service/login",
+          "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/service/login",
           options: Options(
             headers: {
               'Content-Type': 'application/json',
@@ -481,7 +481,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
 // 2️⃣ Llamada GET con params dinámicos
       final response = await _makeGetRequest(
-        'https://www.infocontrol.tech/web/api/mobile/empleados/listartest',
+        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest',
         queryParameters: params,
       );
       print('Respuesta completa empleados/listar: ${response.data}');
@@ -577,7 +577,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final response = await _makeGetRequest(
-        "https://www.infocontrol.tech/web/api/mobile/proveedores/listar",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/proveedores/listar",
         queryParameters: {'id_empresas': widget.empresaId},
       );
       final statusCode = response.statusCode ?? 0;
@@ -756,7 +756,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             params['id_proveedores'] = selectedContractorId!;
           }
           final response = await _makeGetRequest(
-            "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+            "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest",
             queryParameters: params,
           );
 // — hasta aquí —
@@ -789,7 +789,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               };
 
               final postResponse = await _makePostRequest(
-                "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+                "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/Ingresos_egresos/register_movement",
                 postData,
               );
 
@@ -832,7 +832,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           };
 
           final postResponseVeh = await _makePostRequest(
-            "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+            "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/Ingresos_egresos/register_movement",
             postDataVeh,
           );
 
@@ -1007,7 +1007,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         params['id_proveedores'] = selectedContractorId!;
       }
       final response = await _makeGetRequest(
-        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest",
         queryParameters: params,
       );
       print(
@@ -1160,7 +1160,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         params['id_proveedores'] = selectedContractorId!;
       }
       final response = await _makeGetRequest(
-        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest",
         queryParameters: params,
       );
 
@@ -1269,7 +1269,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final response = await _makeGetRequest(
-        "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/vehiculos/listartest",
         queryParameters: {
           'id_empresas': widget.empresaId,
           'id_proveedores': selectedContractorId ?? ''
@@ -1580,7 +1580,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                       };
 
                       final postResponseVeh = await dio.post(
-                        "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+                        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/Ingresos_egresos/register_movement",
                         data: jsonEncode(postDataVeh),
                         options: Options(
                           headers: {
@@ -1703,7 +1703,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       print("==> REGISTER_MOVEMENT param: $postData");
 
       final postResponse = await _makePostRequest(
-        "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/Ingresos_egresos/register_movement",
         postData,
       );
 
@@ -2233,7 +2233,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final response = await _makePostRequest(
-        "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/ingresos_egresos/action_resource",
         postData,
       );
 
@@ -2266,7 +2266,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final response = await _makePostRequest(
-        "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
+        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/ingresos_egresos/action_resource",
         postData,
       );
 
@@ -2543,7 +2543,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   Future<Map<String, dynamic>?> _fetchEmpleadoDetalle(String idEntidad) async {
     try {
       final resp = await dio.get(
-        'https://www.infocontrol.tech/web/api/mobile/empleados/ObtenerEmpleado',
+        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/ObtenerEmpleado',
         queryParameters: {'id_empleados': idEntidad},
         options: Options(
           headers: {
@@ -3244,7 +3244,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
                                     try {
                                       final response = await _makeGetRequest(
-                                        "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
+                                        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/vehiculos/listartest",
                                         queryParameters: {
                                           'id_empresas': widget.empresaId,
                                           'id_proveedores':
