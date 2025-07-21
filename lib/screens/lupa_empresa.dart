@@ -29,6 +29,10 @@ class LupaEmpresaScreen extends StatefulWidget {
   final String empresaId;
   final String username; // para refrescar token en LupaEmpresa
   final String password; // para refrescar token en LupaEmpresa
+  // --- mantiene la selección de contratista cuando se recarga ---
+  final String? selectedContractorInit;
+  final String? selectedContractorIdInit;
+
   final bool openScannerOnInit;
 
   const LupaEmpresaScreen({
@@ -39,6 +43,8 @@ class LupaEmpresaScreen extends StatefulWidget {
     required this.empresaId,
     required this.username,
     required this.password,
+    this.selectedContractorInit,
+    this.selectedContractorIdInit,
     this.openScannerOnInit = false,
   }) : super(key: key);
 
@@ -142,6 +148,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     WidgetsBinding.instance.addObserver(this);
 
     bearerToken = widget.bearerToken;
+    // mantiene la selección del contratista al recargar
+    selectedContractor = widget.selectedContractorInit;
+    selectedContractorId = widget.selectedContractorIdInit;
 
     try {
       final payload = bearerToken.split('.')[1];
@@ -988,6 +997,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       if (selectedContractorId == null || selectedContractorId!.isEmpty) {
         // ① Sin contratista ⇒ mandamos solo el CUIL
         params['cuil'] = texto;
+        params['id_empresas'] = widget.empresaId; // 👈 NUEVO
+        // ===== DEBUG SIN CONTRATISTA (empleados) =====
+        print('⏩ GET empleados/listartest');
+        print('⏩ Params: $params');
       } else {
         // ② Con contratista ⇒ mandamos empresa + proveedor
         params['id_empresas'] = widget.empresaId;
@@ -999,6 +1012,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       );
       print(
           'Respuesta completa empleados/listar (buscarPersonalId): ${response.data}');
+      // ===== DEBUG RESPUESTA SIN CONTRATISTA (empleados) =====
+      print('⏩ Status: ${response.statusCode}');
+      print('⏩ Body  : ${response.data}');
 
       Navigator.pop(context);
       final statusCode = response.statusCode ?? 0;
@@ -1819,7 +1835,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           empresaId: widget.empresaId,
           username: widget.username,
           password: widget.password,
-          openScannerOnInit: true,
+          openScannerOnInit: true, // abre la cámara
+          selectedContractorInit: selectedContractor, // 👈 pasa el actual
+          selectedContractorIdInit: selectedContractorId, // 👈 idem
         ),
       ),
     );
