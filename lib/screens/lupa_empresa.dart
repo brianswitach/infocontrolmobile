@@ -485,6 +485,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         queryParameters: params,
       );
       print('Respuesta completa empleados/listar: ${response.data}');
+      // ---------- PRINT COMPLETO listartest ----------
+      final prettyResp =
+          const JsonEncoder.withIndent('  ').convert(response.data);
+      for (final line in prettyResp.split('\n')) {
+        debugPrint(line);
+      }
+// -----------------------------------------------
+
       final statusCode = response.statusCode ?? 0;
 
       if (statusCode == 200) {
@@ -907,6 +915,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     offlineRequestsBox?.put('requests', currentRequests);
   }
 
+  /// Devuelve true si la cadena parece un OCR/INE o CURP mexicano.
+  bool _esIne(String valor) {
+    final v = valor.trim().toUpperCase();
+    final esOcr13Digitos = RegExp(r'^\d{13}$').hasMatch(v);
+    final esCurp18Alfanum = RegExp(r'^[A-ZÑ]{4}\d{6}[A-Z0-9]{8}$').hasMatch(v);
+    return esOcr13Digitos || esCurp18Alfanum;
+  }
+
   // ==================== BÚSQUEDA DE EMPLEADO (DNI/CUIT/CUIL) ====================
   Future<void> _buscarPersonalId() async {
     final texto = personalIdController.text.trim();
@@ -996,8 +1012,18 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       final Map<String, dynamic> params = {};
       if (selectedContractorId == null || selectedContractorId!.isEmpty) {
         // ① Sin contratista ⇒ mandamos solo el CUIL
-        params['cuil'] = texto;
-        params['id_empresas'] = widget.empresaId; // 👈 NUEVO
+        // ───── MOD v2 : identifico si el valor es INE u otro ────────
+        if (_esIne(texto)) {
+          // 📌 documento mexicano ⇒ buscar por INE
+          params['cuil'] = texto; // el backend lo espera acá
+          params['tipo_documentacion'] = 'ine'; // ← nuevo flag
+        } else {
+          // cualquier otro (DNI/CUIT/CUIL)
+          params['cuil'] = texto;
+          params['tipo_documentacion'] = 'cuil';
+        }
+        params['id_empresas'] = widget.empresaId;
+
         // ===== DEBUG SIN CONTRATISTA (empleados) =====
         print('⏩ GET empleados/listartest');
         print('⏩ Params: $params');
@@ -1005,6 +1031,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         // ② Con contratista ⇒ mandamos empresa + proveedor
         params['id_empresas'] = widget.empresaId;
         params['id_proveedores'] = selectedContractorId!;
+
+        // ► NUEVO: documento + tipo
+        params['cuil'] = texto;
+        params['tipo_documentacion'] = _esIne(texto) ? 'ine' : 'cuil';
       }
       final response = await _makeGetRequest(
         "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest",
@@ -1014,6 +1044,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           'Respuesta completa empleados/listar (buscarPersonalId): ${response.data}');
       // ===== DEBUG RESPUESTA SIN CONTRATISTA (empleados) =====
       print('⏩ Status: ${response.statusCode}');
+      // ---------- LOG JSON COMPLETO listartest ----------
+      const JsonEncoder _pretty = JsonEncoder.withIndent('  ');
+      debugPrint(
+          '### listartest FULL RESPONSE ###\n${_pretty.convert(response.data)}');
+// ---------------------------------------------------
+
       print('⏩ Body  : ${response.data}');
 
       Navigator.pop(context);
@@ -1159,12 +1195,20 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
         params['id_proveedores'] = selectedContractorId!;
       }
+
+      params['cuil'] = ocr;
+      params['tipo_documentacion'] = 'ine';
       final response = await _makeGetRequest(
         "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest",
         queryParameters: params,
       );
 
       Navigator.pop(context); // quita loading
+      // ---------- LOG JSON COMPLETO listartest ----------
+      const JsonEncoder _pretty = JsonEncoder.withIndent('  ');
+      debugPrint(
+          '### listartest FULL RESPONSE ###\n${_pretty.convert(response.data)}');
+// ---------------------------------------------------
 
       if ((response.statusCode ?? 0) == 200) {
         final List empleadosData = response.data['data'] ?? [];
@@ -1177,7 +1221,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         if (encontrado != null) {
           _showEmpleadoDetailsModal(encontrado);
         } else {
-          _alerta('No se encontró ningún empleado con ese INE.');
+          if (encontrado != null) {
+            _showEmpleadoDetailsModal(encontrado);
+          } else {
+            // Lista vacía ⇒ pedir CURP y actualizar
+            _pedirCurpSinRegistro(ocr);
+          }
         }
       } else {
         _alerta('Error ${response.statusCode} al consultar empleados.');
@@ -1918,7 +1967,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   /// Intenta extraer el número de DNI de un PDF-417 peruano.
-  /// Devuelve `true` si reconoció algo y disparó la búsqueda.
+  /// Devuelve true si reconoció algo y disparó la búsqueda.
   bool _procesarDniPeruano(String raw) {
     // Caso típico: campos separados por '@' y el DNI suele
     // venir como cuarto o quinto segmento (8 dígitos).
@@ -1945,7 +1994,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   /// Intenta extraer OCR (13 dígitos) o CURP (18 alfanum.) de un PDF-417 de
-  /// la credencial INE (México). Devuelve `true` si reconoció algo y
+  /// la credencial INE (México). Devuelve true si reconoció algo y
   /// dispara la búsqueda por INE.
   bool _procesarInePdf417(String raw) {
     // 1️⃣ Busca CURP (18 caracteres: 4 letras + 6 dígitos + 8 alfanum.)
@@ -2282,7 +2331,236 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     }
     return {}; // fallback
   }
-// ────────────────────────────────────────────────────────────────
+
+  void _pedirCurpYActualizar(Map<String, dynamic> empleado) {
+    final TextEditingController _curpCtrl = TextEditingController();
+    _curpCtrl.clear(); // ← fuerza a que el TextField salga sin texto
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Por favor agregue el CURP del empleado'),
+        content: TextField(
+          controller: _curpCtrl,
+          decoration: const InputDecoration(
+            hintText: 'Ingrese el CURP completo',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final curp = _curpCtrl.text.trim();
+              if (curp.isEmpty) return;
+              Navigator.of(ctx).pop();
+              await _actualizarEmpleadoCurp(empleado, curp);
+            },
+            child: const Text('Aceptar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// POST al endpoint /empleados/actualizarempleado con el CURP ingresado
+  Future<void> _actualizarEmpleadoCurp(
+      Map<String, dynamic> empleado, String curp) async {
+    print('🌀 ENTRÉ a _actualizarEmpleadoCurp'); //  <-- Línea de verificación
+    final data = <String, dynamic>{
+      'id_empresas': widget.empresaId,
+      'cuil': curp,
+    };
+    print('💾 DATA que enviaré ➜ $data'); // <-- payload
+    if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
+      data['id_proveedores'] = selectedContractorId!;
+    }
+
+    // ► si durante el escaneo teníamos un INE, lo pasamos también
+    final ineVal = empleado['ine']?.toString().trim() ?? '';
+    if (ineVal.isNotEmpty) {
+      data['ine'] = ineVal;
+    }
+
+    // --- LOG de payload -----------------
+    debugPrint('📤 Payload a /empleados/actualizarempleado: $data');
+// ------------------------------------
+
+    try {
+      final resp = await _makePostRequest(
+        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/actualizarempleado',
+        data,
+      );
+      print('📨 RESP completa ➜ ${jsonEncode(resp.data)}');
+      print('==> POST actualizarempleado PARAMS: $data');
+      print('==> POST actualizarempleado STATUS : ${resp.statusCode}');
+      print('==> POST actualizarempleado BODY   : ${resp.data}');
+
+      // Log completo, sin truncar
+      const JsonEncoder _pretty = JsonEncoder.withIndent('  ');
+      debugPrint('### actualizarempleado FULL RESPONSE ###\n'
+          '${_pretty.convert(resp.data)}');
+
+      // Se lo mostramos al usuario para confirmar
+      if (context.mounted) {
+        final bool success = (resp.statusCode ?? 0) == 200;
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: Text(
+              success
+                  ? 'Información guardada con éxito'
+                  : 'Error al guardar la información, por favor intente nuevamente.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error en actualizarempleado: $e');
+    }
+  }
+
+  // --- NUEVO: elegir contratista → luego CURP (INE sin registro) -----------
+  void _pedirContratistaYCurpSimple(String ineIngresado) {
+    String? _contrSel;
+    final TextEditingController _curpCtrl =
+        TextEditingController(text: ineIngresado);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSB) => AlertDialog(
+          title: const Text('Seleccione contratista y cargue el CURP'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                value: _contrSel,
+                items: _getContractorsForDropdown()
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                    .toList(),
+                onChanged: (v) => setSB(() => _contrSel = v),
+                decoration: const InputDecoration(hintText: 'Contratista'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _curpCtrl,
+                decoration:
+                    const InputDecoration(hintText: 'Ingrese el CURP completo'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final curp = _curpCtrl.text.trim();
+                if (_contrSel == null || _contrSel!.isEmpty || curp.isEmpty) {
+                  return; // falta info
+                }
+
+                // guardamos contratista seleccionado
+                final low = _contrSel!.trim().toLowerCase();
+                final prov = allProveedoresListarTest.firstWhere(
+                  (p) =>
+                      (p['nombre_razon_social'] ?? '')
+                          .toString()
+                          .trim()
+                          .toLowerCase() ==
+                      low,
+                  orElse: () => null,
+                );
+
+                setState(() {
+                  selectedContractor = _contrSel;
+                  selectedContractorId =
+                      prov?['id_proveedores']?.toString() ?? '';
+                });
+
+                Navigator.of(ctx).pop();
+                await _actualizarEmpleadoCurpSimple(curp, ineIngresado);
+              },
+              child: const Text('Aceptar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// ═════════ CURP cuando la lista viene vacía (INE no registrado) ═════════
+  // ahora primero pide contratista y luego el CURP
+  void _pedirCurpSinRegistro(String ineIngresado) {
+    _pedirContratistaYCurpSimple(ineIngresado);
+  }
+
+  /// POST simplificado (sin id_entidad) a /empleados/actualizarempleado
+  Future<void> _actualizarEmpleadoCurpSimple(String curp, String ine) async {
+    final data = <String, dynamic>{
+      'id_empresas': widget.empresaId,
+      'cuil': curp,
+    };
+    if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
+      data['id_proveedores'] = selectedContractorId!;
+    }
+
+    data['ine'] = ine;
+
+    // --- LOG de payload -----------------
+    debugPrint('📤 Payload a /empleados/actualizarempleado: $data');
+// ------------------------------------
+
+    try {
+      final resp = await _makePostRequest(
+        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/actualizarempleado',
+        data,
+      );
+
+      print('==> POST actualizarempleado PARAMS: $data');
+      print('==> POST actualizarempleado STATUS : ${resp.statusCode}');
+      print('==> POST actualizarempleado BODY   : ${resp.data}');
+
+      const JsonEncoder _pretty = JsonEncoder.withIndent('  ');
+      debugPrint('### actualizarempleado FULL RESPONSE ###\n'
+          '${_pretty.convert(resp.data)}');
+
+      if (context.mounted) {
+        final bool success = (resp.statusCode ?? 0) == 200;
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: Text(
+              success
+                  ? 'Información guardada con éxito'
+                  : 'Error al guardar la información, por favor intente nuevamente.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error en actualizarempleado: $e');
+    }
+  }
 
   // ==================== MOSTRAR DETALLES DEL EMPLEADO ====================
   Future<void> _showEmpleadoDetailsModal(dynamic empleado) async {
@@ -2295,6 +2573,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     String apellidoVal = '';
     String nombreVal = '';
     String dniVal = (empleado['valor']?.toString().trim() ?? '');
+
+// ---------------------------------------------------------
 
     if (datosString.isNotEmpty &&
         datosString.startsWith('[') &&
@@ -2564,7 +2844,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   /// Devuelve los bytes de la imagen que viene en imagen_array (Base64),
-  /// o `null` si no hay nada.
+  /// o null si no hay nada.
   Future<Uint8List?> _fetchEmpleadoImageFromDetalle(String idEntidad) async {
     final detalleRoot = await _fetchEmpleadoDetalle(idEntidad);
     // Ahora extraemos primero data_empleado:
