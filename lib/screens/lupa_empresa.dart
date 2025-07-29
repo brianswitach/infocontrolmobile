@@ -89,6 +89,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   bool isLoading = true;
   bool _autoProcessingGelymar = false;
+  bool _curpModalOpen = false; // <- evita que el modal CURP se abra dos veces
 
   //final MobileScannerController controladorCamara = MobileScannerController();
   final TextEditingController personalIdController = TextEditingController();
@@ -974,7 +975,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     if (localMatch != null) {
       _showEmpleadoDetailsModal(localMatch); // 👉 abre el modal sin ir a la red
-      return; // ⬅️ salimos del método aquí
+      // return; // ⬅️ salimos del método aquí
     }
 
     // Loading
@@ -1093,9 +1094,18 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               cuil == dniIngresado);
         }, orElse: () => null);
 
+        // ─── BLOQUE NUEVO: muestra modal si falta INE ─────────────────────
         if (foundEmployee != null) {
+          // ① Si el campo INE está vacío ⇒ pedir CURP/INE y actualizar
+          if ((foundEmployee['ine']?.toString().trim() ?? '').isEmpty) {
+            _pedirCurpYActualizar(foundEmployee); // abre el pop‑up
+            return; // evita abrir el detalle viejo
+          }
+
+          // ② Con INE cargado ⇒ mostrar el detalle habitual
           _showEmpleadoDetailsModal(foundEmployee);
         } else {
+          // No se encontró el documento en la lista
           showDialog(
             context: context,
             builder: (ctx) {
@@ -1113,6 +1123,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             },
           );
         }
+// ──────────────────────────────────────────────────────────────────
       } else {
         showDialog(
           context: context,
@@ -1212,6 +1223,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
       if ((response.statusCode ?? 0) == 200) {
         final List empleadosData = response.data['data'] ?? [];
+
+        // ─── DEBUG: ¿la lista vino vacía? ───────────────────────────────
+        if (empleadosData.isEmpty) {
+          print('⚠️  empleados/listartest devolvió 0 registros '
+              '(buscado con INE/CURP: $ocr)');
+        } else {
+          print('✅  empleados/listartest devolvió '
+              '${empleadosData.length} registro(s)');
+        }
+// ────────────────────────────────────────────────────────────────
 
         final encontrado = empleadosData.firstWhere(
           (emp) => (emp['ine']?.toString().trim() ?? '') == ocr,
@@ -2333,56 +2354,103 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   void _pedirCurpYActualizar(Map<String, dynamic> empleado) {
+    // ─── candado: si ya está abierto no lo vuelvas a mostrar ───
+    if (_curpModalOpen) return;
+    _curpModalOpen = true;
+// ───────────────────────────────────────────────────────────
+    String? _contrSel; // ← contratista elegido en el diálogo
     final TextEditingController _curpCtrl = TextEditingController();
     _curpCtrl.clear(); // ← fuerza a que el TextField salga sin texto
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Por favor agregue el CURP del empleado'),
-        content: TextField(
-          controller: _curpCtrl,
-          decoration: const InputDecoration(
-            hintText: 'Ingrese el CURP completo',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSB) => AlertDialog(
+          title: const Text('Seleccione contratista y cargue el INE'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ─────────── DROP‑DOWN CONTRATISTA ───────────
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                value: _contrSel,
+                items: _getContractorsForDropdown()
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                    .toList(),
+                onChanged: (v) => setSB(() => _contrSel = v),
+                decoration: const InputDecoration(hintText: 'Contratista'),
+              ),
+              const SizedBox(height: 12),
+              // ─────────── TEXTFIELD CURP ───────────
+              TextField(
+                controller: _curpCtrl,
+                decoration: const InputDecoration(
+                  hintText: 'Ingrese el INE completo',
+                ),
+              ),
+            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final curp = _curpCtrl.text.trim();
+                if (curp.isEmpty || _contrSel == null || _contrSel!.isEmpty)
+                  return;
+
+                // ▸ guardamos la elección de contratista
+                final low = _contrSel!.trim().toLowerCase();
+                final prov = allProveedoresListarTest.firstWhere(
+                  (p) =>
+                      (p['nombre_razon_social'] ?? '')
+                          .toString()
+                          .trim()
+                          .toLowerCase() ==
+                      low,
+                  orElse: () => null,
+                );
+
+                setState(() {
+                  selectedContractor = _contrSel;
+                  selectedContractorId =
+                      prov?['id_proveedores']?.toString() ?? '';
+                });
+
+                Navigator.of(ctx).pop(); // cierra el diálogo
+                await _actualizarEmpleadoCurp(
+                    empleado, curp); // incluye id_proveedores
+              },
+              child: const Text('Aceptar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () async {
-              final curp = _curpCtrl.text.trim();
-              if (curp.isEmpty) return;
-              Navigator.of(ctx).pop();
-              await _actualizarEmpleadoCurp(empleado, curp);
-            },
-            child: const Text('Aceptar'),
-          ),
-        ],
       ),
-    );
+    ).then((_) => _curpModalOpen = false); // ← libera el candado
   }
 
   /// POST al endpoint /empleados/actualizarempleado con el CURP ingresado
   Future<void> _actualizarEmpleadoCurp(
       Map<String, dynamic> empleado, String curp) async {
     print('🌀 ENTRÉ a _actualizarEmpleadoCurp'); //  <-- Línea de verificación
+    // ───── NUEVO BLOQUE CON CUIL + INE ─────
+// ─── NUEVO payload, sin id_empleados ───
     final data = <String, dynamic>{
-      'id_empresas': widget.empresaId,
-      'cuil': curp,
+      'id_empresas': widget.empresaId, // empresa
+      'cuil': (empleado['cuil'] ?? '').toString().trim(), // cuil que ya tenés
+      'ine': curp, // valor ingresado
     };
-    print('💾 DATA que enviaré ➜ $data'); // <-- payload
+// agregar contratista si lo hay
     if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
       data['id_proveedores'] = selectedContractorId!;
     }
 
-    // ► si durante el escaneo teníamos un INE, lo pasamos también
-    final ineVal = empleado['ine']?.toString().trim() ?? '';
-    if (ineVal.isNotEmpty) {
-      data['ine'] = ineVal;
+    print('💾 DATA que enviaré ➜ $data'); // <-- payload
+    if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
+      data['id_proveedores'] = selectedContractorId!;
     }
 
     // --- LOG de payload -----------------
@@ -2394,6 +2462,9 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/actualizarempleado',
         data,
       );
+
+      print('==> POST /empleados/actualizarempleado – payload final: $data');
+
       print('📨 RESP completa ➜ ${jsonEncode(resp.data)}');
       print('==> POST actualizarempleado PARAMS: $data');
       print('==> POST actualizarempleado STATUS : ${resp.statusCode}');
@@ -2440,7 +2511,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSB) => AlertDialog(
-          title: const Text('Seleccione contratista y cargue el CURP'),
+          title: const Text('Seleccione contratista y cargue el INE'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2457,7 +2528,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               TextField(
                 controller: _curpCtrl,
                 decoration:
-                    const InputDecoration(hintText: 'Ingrese el CURP completo'),
+                    const InputDecoration(hintText: 'Ingrese el INE completo'),
               ),
             ],
           ),
@@ -2510,10 +2581,16 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
   /// POST simplificado (sin id_entidad) a /empleados/actualizarempleado
   Future<void> _actualizarEmpleadoCurpSimple(String curp, String ine) async {
+    print('==> DEBUG – payload que se enviará:'
+        ' {id_empresas: ${widget.empresaId}, '
+        'id_proveedores: ${selectedContractorId}, '
+        'cuil: $curp, ine: $ine}');
+
     final data = <String, dynamic>{
       'id_empresas': widget.empresaId,
       'cuil': curp,
     };
+
     if (selectedContractorId != null && selectedContractorId!.isNotEmpty) {
       data['id_proveedores'] = selectedContractorId!;
     }
@@ -2529,6 +2606,8 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/actualizarempleado',
         data,
       );
+
+      print('==> POST /empleados/actualizarempleado – payload final: $data');
 
       print('==> POST actualizarempleado PARAMS: $data');
       print('==> POST actualizarempleado STATUS : ${resp.statusCode}');
@@ -2567,6 +2646,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     // Obtenemos el estado del empleado
     //  final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
     //  final bool isHabilitado = estado == 'habilitado';
+
+    // ─── SALIDA ANTICIPADA SI FALTA INE ───────────────────────────────
+    if ((empleado['ine']?.toString().trim() ?? '').isEmpty) {
+      _pedirCurpYActualizar(empleado); // abre solo el modal de CURP
+      return; // evita mostrar el detalle
+    }
+    // ──────────────────────────────────────────────────────────────────
 
     // Extraemos datos del empleado (nombre, apellido, dni)
     final datosString = empleado['datos']?.toString() ?? '';
