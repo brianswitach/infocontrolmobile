@@ -12,6 +12,18 @@ import './login_screen.dart';
 import './lupa_empresa.dart';
 import 'hive_helper.dart';
 
+String _firstLetter(String? txt, String fallback) {
+  if (txt == null || txt.isEmpty) {
+    debugPrint(
+        '[avatar] Nombre vacío → uso fallback "$fallback"'); // ← registro
+    return fallback;
+  }
+
+  final inicial = txt[0].toUpperCase();
+  debugPrint('[avatar] Nombre "$txt" → inicial "$inicial"'); // ← registro
+  return inicial;
+}
+
 class HomeScreen extends StatefulWidget {
   final String bearerToken;
   final List<Map<String, dynamic>> empresas;
@@ -149,7 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
     while (attempt < maxAttempts && !success) {
       try {
         final response = await dio.post(
-          "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/service/login",
+          "https://www.infocontrol.tech/web/api/mobile/service/login",
           options: Options(
             headers: {
               'Content-Type': 'application/json',
@@ -224,7 +236,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       final response = await dio.get(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/listar",
+        "https://www.infocontrol.tech/web/api/mobile/empresas/listar",
         options: Options(
           headers: {
             'Content-Type': 'application/json',
@@ -331,7 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     try {
       final response = await dio.get(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
+        "https://www.infocontrol.tech/web/api/mobile/empresas/empresasinstalaciones?id_empresas=$empresaId",
         options: Options(
           headers: {
             'Content-Type': 'application/json',
@@ -384,6 +396,53 @@ class _HomeScreenState extends State<HomeScreen> {
     await box.put('id_empresas_key', idEmpresas);
   }
 
+  // ──────────────────────────────────────────────────────────────
+  // ↺ Botón de recarga – overlay “Cargando…”, delay ≥1 s ½ y logs
+  // ──────────────────────────────────────────────────────────────
+  // ↺ Botón de recarga – overlay sólo con spinner y delay ≥1,5 s
+  Future<void> _recargarHome() async {
+    if (!mounted) return;
+
+    // ① Overlay con solo un CircularProgressIndicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final Stopwatch _sw = Stopwatch()..start();
+    bool ok = true;
+
+    try {
+      print('➡️ /api/mobile/service/login');
+      await _refreshBearerToken();
+
+      print('➡️ /api/mobile/empresas/listar');
+      await _updateDataFromServer();
+
+      print('✅ Pantalla recargada');
+    } catch (e) {
+      ok = false;
+      print('❌ Error al recargar HomeScreen: $e');
+    }
+
+    // ② Aseguramos mínimo 1,5 s de overlay
+    final int elapsed = _sw.elapsedMilliseconds;
+    if (elapsed < 1500) {
+      await Future.delayed(Duration(milliseconds: 1500 - elapsed));
+    }
+
+    // ③ Cerramos overlay y actualizamos UI
+    if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    if (mounted) setState(() => _isLoading = false);
+
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error al recargar HomeScreen')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     List<Map<String, dynamic>> empresasSinGrupoFiltradas =
@@ -397,7 +456,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-          backgroundColor: Colors.white, elevation: 0, title: Container()),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: Container(), // (mantiene tu título vacío original)
+        actions: [
+          // 🔄 NUEVO botón de recarga
+          IconButton(
+            icon: const Icon(Icons.sync),
+            color: const Color(0xFF2a3666),
+            tooltip: 'Recargar',
+            onPressed: _recargarHome, // función que creamos abajo
+          ),
+        ],
+      ),
       body: _isLoading && empresas.isEmpty
           ? Center(
               child: CircularProgressIndicator(
@@ -542,9 +613,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   backgroundColor: Color(0xFF2a3666),
                                   radius: 15,
                                   child: Text(
-                                    (empresa['nombre']?[0] ?? 'E')
-                                        .toString()
-                                        .toUpperCase(),
+                                    _firstLetter(
+                                        empresa['nombre']?.toString(), 'E'),
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold,
@@ -646,9 +716,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                       backgroundColor: Color(0xFF2a3666),
                                       radius: 15,
                                       child: Text(
-                                        (grupo['nombre']?[0] ?? 'G')
-                                            .toString()
-                                            .toUpperCase(),
+                                        _firstLetter(
+                                            grupo['nombre']?.toString(), 'G'),
                                         style: TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.bold,

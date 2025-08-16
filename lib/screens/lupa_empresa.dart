@@ -10,17 +10,20 @@ import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart'; // ← necesario para compute
-
-//import './scanner_page.dart';
-
-// IMPORTAMOS LA PANTALLA DE LOGIN PARA FORZAR REAUTENTICACIÓN
 import 'login_screen.dart';
-
-// **IMPORTAMOS HIVE HELPER** (por si usas otros métodos de helper,
-// pero ya no usaremos HiveHelper.getIdUsuarios(),
-// sino que leeremos directamente de la box "id_usuarios2")
 // ignore: unused_import
 import 'hive_helper.dart';
+import 'dart:math' as math;
+
+/// Imprime cualquier string por partes de 800 caracteres para que
+/// Logcat no lo corte.
+void logBig(String text) {
+  const int chunk = 800;
+  for (var i = 0; i < text.length; i += chunk) {
+    final end = math.min(i + chunk, text.length);
+    debugPrint(text.substring(i, end));
+  }
+}
 
 class LupaEmpresaScreen extends StatefulWidget {
   final Map<String, dynamic> empresa;
@@ -294,7 +297,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final resp = await _makeGetRequest(
-        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest',
+        'https://www.infocontrol.tech/web/api/mobile/empleados/listartest',
         queryParameters: {'id_empresas': widget.empresaId},
       );
       if ((resp.statusCode ?? 0) == 200) {
@@ -314,6 +317,38 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       debugPrint('❌ Prefetch falló: $e');
     }
   }
+
+  // ════════════════════════════════════════════════════════════
+  // Botón “Recargar” ↺
+  Future<void> _recargarPantalla() async {
+    setState(() => isLoading = true); // ① muestra spinner global
+
+    // ② refrescamos el token (pega a /service/login si es necesario)
+    final ok = await _refreshBearerTokenLupa();
+    if (!ok) {
+      // si falla, _refreshBearerTokenLupa hace logout
+      setState(() => isLoading = false);
+      return;
+    }
+
+    // ③ volvemos a pedir la lista de contratistas
+    await _fetchAllProveedoresListar(); // /proveedores/listar?id_empresas=...
+
+    // ④ limpiamos pantallas/selecciones
+    setState(() {
+      selectedContractor = null;
+      selectedContractorId = null;
+      selectedContractorEstado = null;
+      showContractorInfo = false;
+      showEmployees = false;
+      showVehicles = false;
+      empleados.clear();
+      filteredEmpleados.clear();
+      filteredVehiculos.clear();
+      isLoading = false; // ⑤ oculta spinner
+    });
+  }
+  // ════════════════════════════════════════════════════════════
 
   // ==================== HIVE CONFIG ====================
   Future<void> _initHive() async {
@@ -390,7 +425,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     while (attempt < maxAttempts && !success) {
       try {
         final response = await dio.post(
-          "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/service/login",
+          "https://www.infocontrol.tech/web/api/mobile/service/login",
           options: Options(
             headers: {
               'Content-Type': 'application/json',
@@ -482,7 +517,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
 // 2️⃣ Llamada GET con params dinámicos
       final response = await _makeGetRequest(
-        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest',
+        'https://www.infocontrol.tech/web/api/mobile/empleados/listartest',
         queryParameters: params,
       );
       print('Respuesta completa empleados/listar: ${response.data}');
@@ -586,7 +621,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final response = await _makeGetRequest(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/proveedores/listar",
+        "https://www.infocontrol.tech/web/api/mobile/proveedores/listar",
         queryParameters: {'id_empresas': widget.empresaId},
       );
       final statusCode = response.statusCode ?? 0;
@@ -596,12 +631,13 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         List<dynamic> proveedoresData = responseData['data'] ?? [];
 
         allProveedoresListarTest = proveedoresData;
-        contractorsBox?.put('all_contractors', proveedoresData);
+        // ░▓ GUARDAR LISTA POR EMPRESA ▓░
+        contractorsBox?.put('contr_${widget.empresaId}', proveedoresData);
 
         // **NUEVO**: Extraer y guardar los id_proveedores
         List<dynamic> idProveedoresList =
             proveedoresData.map((item) => item['id_proveedores']).toList();
-        contractorsBox?.put('id_proveedores_list', idProveedoresList);
+        contractorsBox?.put('ids_${widget.empresaId}', idProveedoresList);
 
         setState(() {
           isLoading = false;
@@ -650,8 +686,10 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   }
 
   void _loadContractorsFromHive() {
+    // ░▓ LEEMOS LA LISTA ESPECÍFICA DE ESTA EMPRESA ▓░
     List<dynamic> storedContractors = contractorsBox
-        ?.get('all_contractors', defaultValue: []) as List<dynamic>;
+        ?.get('contr_${widget.empresaId}', defaultValue: []) as List<dynamic>;
+
     if (storedContractors.isNotEmpty) {
       allProveedoresListarTest = storedContractors;
     } else {
@@ -662,6 +700,25 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             backgroundColor: Colors.red,
           ),
         );
+      } else {
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Sin contratistas'),
+              content: const Text(
+                'No hay contratistas descargados para esta empresa.\n'
+                'Vuelva a ingresar con conexión para obtener los datos.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
       }
     }
   }
@@ -765,7 +822,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
             params['id_proveedores'] = selectedContractorId!;
           }
           final response = await _makeGetRequest(
-            "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest",
+            "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
             queryParameters: params,
           );
 // — hasta aquí —
@@ -798,7 +855,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
               };
 
               final postResponse = await _makePostRequest(
-                "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/Ingresos_egresos/register_movement",
+                "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
                 postData,
               );
 
@@ -841,7 +898,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           };
 
           final postResponseVeh = await _makePostRequest(
-            "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/Ingresos_egresos/register_movement",
+            "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
             postDataVeh,
           );
 
@@ -1038,7 +1095,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
         params['tipo_documentacion'] = _esIne(texto) ? 'ine' : 'cuil';
       }
       final response = await _makeGetRequest(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest",
+        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
         queryParameters: params,
       );
       print(
@@ -1210,7 +1267,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       params['cuil'] = ocr;
       params['tipo_documentacion'] = 'ine';
       final response = await _makeGetRequest(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/listartest",
+        "https://www.infocontrol.tech/web/api/mobile/empleados/listartest",
         queryParameters: params,
       );
 
@@ -1339,7 +1396,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final response = await _makeGetRequest(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/vehiculos/listartest",
+        "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
         queryParameters: {
           'id_empresas': widget.empresaId,
           'id_proveedores': selectedContractorId ?? ''
@@ -1650,7 +1707,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                       };
 
                       final postResponseVeh = await dio.post(
-                        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/Ingresos_egresos/register_movement",
+                        "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
                         data: jsonEncode(postDataVeh),
                         options: Options(
                           headers: {
@@ -1773,7 +1830,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
       print("==> REGISTER_MOVEMENT param: $postData");
 
       final postResponse = await _makePostRequest(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/Ingresos_egresos/register_movement",
+        "https://www.infocontrol.tech/web/api/mobile/Ingresos_egresos/register_movement",
         postData,
       );
 
@@ -2303,13 +2360,17 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final response = await _makePostRequest(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/ingresos_egresos/action_resource",
+        "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
         postData,
       );
 
       // 🔸 IMPRIMIMOS SIEMPRE, venga el código que venga
       print('ACTION_RESOURCE status: ${response.statusCode}');
       print('ACTION_RESOURCE body  : ${response.data}');
+      // 👉 PRINT DETALLADO (pretty-print) de la respuesta completa
+      const JsonEncoder _pretty = JsonEncoder.withIndent('  ');
+      debugPrint('### ACTION_RESOURCE FULL RESPONSE ###\n'
+          '${_pretty.convert(response.data)}');
 
       if ((response.statusCode ?? 0) == 200) {
         final respData = response.data ?? {};
@@ -2336,7 +2397,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final response = await _makePostRequest(
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/ingresos_egresos/action_resource",
+        "https://www.infocontrol.tech/web/api/mobile/ingresos_egresos/action_resource",
         postData,
       );
 
@@ -2459,7 +2520,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final resp = await _makePostRequest(
-        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/actualizarempleado',
+        'https://www.infocontrol.tech/web/api/mobile/empleados/actualizarempleado',
         data,
       );
 
@@ -2603,7 +2664,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
     try {
       final resp = await _makePostRequest(
-        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/actualizarempleado',
+        'https://www.infocontrol.tech/web/api/mobile/empleados/actualizarempleado',
         data,
       );
 
@@ -2647,12 +2708,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
     //  final estado = (empleado['estado']?.toString().trim() ?? '').toLowerCase();
     //  final bool isHabilitado = estado == 'habilitado';
 
-    // ─── SALIDA ANTICIPADA SI FALTA INE ───────────────────────────────
-    if ((empleado['ine']?.toString().trim() ?? '').isEmpty) {
-      _pedirCurpYActualizar(empleado); // abre solo el modal de CURP
-      return; // evita mostrar el detalle
-    }
-    // ──────────────────────────────────────────────────────────────────
+    // ─── FALTA INE ──────────────────────────────────────────
+// Si el empleado no tiene INE cargado ya NO bloqueamos el
+// modal de detalle.  Opcional: descomentá la línea de abajo
+// si querés seguir mostrando el diálogo para cargar el INE
+// _pedirCurpYActualizar(empleado);
+// ─────────────────────────────────────────────────────────
 
     // Extraemos datos del empleado (nombre, apellido, dni)
     final datosString = empleado['datos']?.toString() ?? '';
@@ -2909,7 +2970,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
   Future<Map<String, dynamic>?> _fetchEmpleadoDetalle(String idEntidad) async {
     try {
       final resp = await dio.get(
-        'https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empleados/ObtenerEmpleado',
+        'https://www.infocontrol.tech/web/api/mobile/empleados/ObtenerEmpleado',
         queryParameters: {'id_empleados': idEntidad},
         options: Options(
           headers: {
@@ -2918,8 +2979,12 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           },
         ),
       );
-      print('ObtenerEmpleado código: ${resp.statusCode}');
-      print('ObtenerEmpleado respuesta completa: ${resp.data}');
+
+      // 👉 PRINT SIN RECORTES
+      const JsonEncoder _pretty = JsonEncoder.withIndent('  ');
+      final pretty = _pretty.convert(resp.data);
+      logBig('### OBTENER_EMPLEADO FULL RESPONSE ###\n$pretty');
+
       if (resp.statusCode == 200) {
         return resp.data['data'] as Map<String, dynamic>;
       }
@@ -2972,6 +3037,14 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
           },
         ),
         actions: [
+          // 🔄 Botón de recarga
+          IconButton(
+            icon: const Icon(Icons.sync),
+            color: const Color(0xFF2a3666),
+            tooltip: 'Recargar',
+            onPressed: _recargarPantalla,
+          ),
+          // 🔍 Botón de búsqueda (ya existente)
           IconButton(
             icon: const Icon(Icons.search, color: Color(0xFF2a3666)),
             onPressed: () {},
@@ -3610,7 +3683,7 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
 
                                     try {
                                       final response = await _makeGetRequest(
-                                        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/vehiculos/listartest",
+                                        "https://www.infocontrol.tech/web/api/mobile/vehiculos/listartest",
                                         queryParameters: {
                                           'id_empresas': widget.empresaId,
                                           'id_proveedores':
@@ -3793,26 +3866,30 @@ class _LupaEmpresaScreenState extends State<LupaEmpresaScreen>
                                         // → Dentro de tu ListView / Column, en lugar del onPressed anterior:
                                         ElevatedButton(
                                           onPressed: () async {
-                                            // 1) Obtenemos el id de la entidad
+                                            // 1️⃣ Id de la entidad (si viene vacío no hacemos nada)
                                             final idEntidad =
                                                 empleado['id_entidad']
                                                         ?.toString() ??
                                                     '';
                                             if (idEntidad.isEmpty) return;
 
-                                            // 2) Llamamos al servicio y lo imprimimos por consola
+                                            // 2️⃣ Llamamos al endpoint DETALLE solo para loggear la respuesta
                                             try {
                                               final detalle =
                                                   await _fetchEmpleadoDetalle(
                                                       idEntidad);
-                                              print(
-                                                  'Detalle en background: $detalle');
+                                              // 👉 imprime la respuesta completa por consola
+                                              const JsonEncoder _pretty =
+                                                  JsonEncoder.withIndent('  ');
+                                              debugPrint(
+                                                  '### OBTENER_EMPLEADO FULL RESPONSE ###\n'
+                                                  '${_pretty.convert(detalle)}');
                                             } catch (e) {
                                               print(
-                                                  'Error en background ObtenerEmpleado: $e');
+                                                  'Error ObtenerEmpleado: $e');
                                             }
 
-                                            // 3) Abrimos el modal con los datos que ya tenías
+                                            // 3️⃣ Mostramos el modal con la información del empleado
                                             _showEmpleadoDetailsModal(empleado);
                                           },
                                           style: ElevatedButton.styleFrom(

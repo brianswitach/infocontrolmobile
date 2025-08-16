@@ -8,7 +8,9 @@ class HiveHelper {
   static const String userDataBoxName = 'userDataBox';
   static const String pendingRequestsBoxName = 'pendingRequestsBox';
 
-  // Inicializar Hive y abrir los boxes necesarios
+  // ────────────────────────────
+  //  Inicializar Hive
+  // ────────────────────────────
   static Future<void> initHive() async {
     await Hive.openBox(empresasBoxName);
     await Hive.openBox(instalacionesBoxName);
@@ -18,17 +20,32 @@ class HiveHelper {
     await Hive.openBox(pendingRequestsBoxName);
   }
 
-  // Empresas
-  static Future<void> insertEmpresas(List<Map<String, dynamic>> empresas) async {
+  // ────────────────────────────
+  //  EMPRESAS
+  // ────────────────────────────
+  static Future<void> insertEmpresas(
+      List<Map<String, dynamic>> empresas) async {
     final box = Hive.box(empresasBoxName);
-    await box.put('empresasList', empresas);
+
+    // Cast fuerte: todas las claves → String
+    final cleanList =
+        empresas.map((e) => Map<String, dynamic>.from(e)).toList();
+
+    await box.put('empresasList', cleanList);
   }
 
   static List<Map<String, dynamic>> getEmpresas() {
     final box = Hive.box(empresasBoxName);
-    return List<Map<String, dynamic>>.from(
-      box.get('empresasList', defaultValue: []),
-    );
+    final raw = box.get('empresasList', defaultValue: []);
+
+    // Cast seguro elemento-por-elemento
+    return (raw as List)
+        .map<Map<String, dynamic>>(
+          (e) => Map<String, dynamic>.from(
+            (e as Map).cast<String, dynamic>(),
+          ),
+        )
+        .toList();
   }
 
   static Future<void> deleteEmpresas() async {
@@ -36,17 +53,30 @@ class HiveHelper {
     await box.delete('empresasList');
   }
 
-  // Grupos
+  // ────────────────────────────
+  //  GRUPOS  (modificado)
+  // ────────────────────────────
   static Future<void> insertGrupos(List<Map<String, dynamic>> grupos) async {
     final box = Hive.box(gruposBoxName);
-    await box.put('gruposList', grupos);
+
+    // Cast fuerte igual que en empresas
+    final cleanList = grupos.map((g) => Map<String, dynamic>.from(g)).toList();
+
+    await box.put('gruposList', cleanList);
   }
 
   static List<Map<String, dynamic>> getGrupos() {
     final box = Hive.box(gruposBoxName);
-    return List<Map<String, dynamic>>.from(
-      box.get('gruposList', defaultValue: []),
-    );
+    final raw = box.get('gruposList', defaultValue: []);
+
+    // Cast seguro elemento-por-elemento
+    return (raw as List)
+        .map<Map<String, dynamic>>(
+          (e) => Map<String, dynamic>.from(
+            (e as Map).cast<String, dynamic>(),
+          ),
+        )
+        .toList();
   }
 
   static Future<void> deleteGrupos() async {
@@ -54,18 +84,27 @@ class HiveHelper {
     await box.delete('gruposList');
   }
 
-  // Instalaciones
-  static Future<void> insertInstalaciones(String empresaId,
-      List<Map<String, dynamic>> instalaciones) async {
+  // ────────────────────────────
+  //  INSTALACIONES
+  // ────────────────────────────
+  static Future<void> insertInstalaciones(
+      String empresaId, List<Map<String, dynamic>> instalaciones) async {
     final box = Hive.box(instalacionesBoxName);
-    await box.put(empresaId, instalaciones);
+    final cleanList =
+        instalaciones.map((e) => Map<String, dynamic>.from(e)).toList();
+    await box.put(empresaId, cleanList);
   }
 
   static List<Map<String, dynamic>> getInstalaciones(String empresaId) {
     final box = Hive.box(instalacionesBoxName);
-    return List<Map<String, dynamic>>.from(
-      box.get(empresaId, defaultValue: []),
-    );
+    final raw = box.get(empresaId, defaultValue: []);
+    return (raw as List)
+        .map<Map<String, dynamic>>(
+          (e) => Map<String, dynamic>.from(
+            (e as Map).cast<String, dynamic>(),
+          ),
+        )
+        .toList();
   }
 
   static Future<void> deleteInstalaciones(String empresaId) async {
@@ -73,8 +112,11 @@ class HiveHelper {
     await box.delete(empresaId);
   }
 
-  // Empleados (guarda la lista general para la empresa)
-  static Future<void> insertEmpleados(String empresaId, List<dynamic> empleados) async {
+  // ────────────────────────────
+  //  EMPLEADOS (general)
+  // ────────────────────────────
+  static Future<void> insertEmpleados(
+      String empresaId, List<dynamic> empleados) async {
     final box = Hive.box(empleadosBoxName);
     await box.put(empresaId, empleados);
   }
@@ -91,24 +133,26 @@ class HiveHelper {
     await box.delete(empresaId);
   }
 
-  // Empleados de un contratista específico en una empresa
-  // Se usa una clave compuesta: "empresaId + '_' + contractorLower"
+  // ────────────────────────────
+  //  EMPLEADOS de un contratista
+  // ────────────────────────────
   static Future<void> insertContratistaEmpleados(
       String empresaId, String contractorLower, List<dynamic> empleados) async {
     final box = Hive.box(empleadosBoxName);
-    final key = '${empresaId}_$contractorLower';
-    await box.put(key, empleados);
+    await box.put('${empresaId}_$contractorLower', empleados);
   }
 
-  static List<dynamic> getContratistaEmpleados(String empresaId, String contractorLower) {
+  static List<dynamic> getContratistaEmpleados(
+      String empresaId, String contractorLower) {
     final box = Hive.box(empleadosBoxName);
-    final key = '${empresaId}_$contractorLower';
     return List<dynamic>.from(
-      box.get(key, defaultValue: []),
+      box.get('${empresaId}_$contractorLower', defaultValue: []),
     );
   }
 
-  // id_usuarios
+  // ────────────────────────────
+  //  DATOS DE USUARIO
+  // ────────────────────────────
   static Future<void> storeIdUsuarios(String idUsuarios) async {
     final box = Hive.box(userDataBoxName);
     await box.put('id_usuarios', idUsuarios);
@@ -119,7 +163,6 @@ class HiveHelper {
     return box.get('id_usuarios', defaultValue: '');
   }
 
-  // Bearer Token
   static Future<void> storeBearerToken(String token) async {
     final box = Hive.box(userDataBoxName);
     await box.put('bearer_token', token);
@@ -130,7 +173,20 @@ class HiveHelper {
     return box.get('bearer_token', defaultValue: '');
   }
 
-  // ---- CREDENCIALES OFFLINE (NUEVO) ----
+  // Puede entrar a LupaEmpresa
+  static Future<void> storePuedeEntrarLupa(bool value) async {
+    final box = Hive.box(userDataBoxName);
+    await box.put('puedeEntrarLupa', value);
+  }
+
+  static bool getPuedeEntrarLupa() {
+    final box = Hive.box(userDataBoxName);
+    return box.get('puedeEntrarLupa', defaultValue: false);
+  }
+
+  // ────────────────────────────
+  //  CREDENCIALES OFFLINE
+  // ────────────────────────────
   static Future<void> storeUsernameOffline(String username) async {
     final box = Hive.box(userDataBoxName);
     await box.put('usernameoffline', username);
@@ -151,11 +207,15 @@ class HiveHelper {
     return box.get('passwordoffline', defaultValue: '');
   }
 
-  // Solicitudes OFFLINE
-  static Future<void> savePendingDNIRequest(Map<String, dynamic> pendingData) async {
+  // ────────────────────────────
+  //  SOLICITUDES OFFLINE
+  // ────────────────────────────
+  static Future<void> savePendingDNIRequest(
+      Map<String, dynamic> pendingData) async {
     final box = Hive.box(pendingRequestsBoxName);
-    List<Map<String, dynamic>> pendingList =
-        List<Map<String, dynamic>>.from(box.get('pendingDNIList', defaultValue: []));
+    List<Map<String, dynamic>> pendingList = List<Map<String, dynamic>>.from(
+      box.get('pendingDNIList', defaultValue: []),
+    );
     pendingList.add(pendingData);
     await box.put('pendingDNIList', pendingList);
   }
@@ -167,14 +227,17 @@ class HiveHelper {
     );
   }
 
-  static Future<void> removePendingDNIRequest(Map<String, dynamic> requestData) async {
+  static Future<void> removePendingDNIRequest(
+      Map<String, dynamic> requestData) async {
     final box = Hive.box(pendingRequestsBoxName);
-    List<Map<String, dynamic>> pendingList =
-        List<Map<String, dynamic>>.from(box.get('pendingDNIList', defaultValue: []));
-    pendingList.removeWhere((item) {
-      return item['dni'] == requestData['dni'] &&
-             item['timestamp'] == requestData['timestamp'];
-    });
+    List<Map<String, dynamic>> pendingList = List<Map<String, dynamic>>.from(
+      box.get('pendingDNIList', defaultValue: []),
+    );
+    pendingList.removeWhere(
+      (item) =>
+          item['dni'] == requestData['dni'] &&
+          item['timestamp'] == requestData['timestamp'],
+    );
     await box.put('pendingDNIList', pendingList);
   }
 }

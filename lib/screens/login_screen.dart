@@ -157,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     String loginUrl =
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/service/login";
+        "https://www.infocontrol.tech/web/api/mobile/service/login";
     String username = _usernameController.text.trim();
     String password = _passwordController.text.trim();
     String basicAuth =
@@ -166,39 +166,11 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       var connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
-        // SIN CONEXIÓN: Comprobamos credenciales offline
-        Navigator.pop(context); // Cerramos el diálogo de "Cargando..."
+        Navigator.pop(context); // cerramos "Cargando..."
 
-        final storedUser = HiveHelper.getUsernameOffline();
-        final storedPass = HiveHelper.getPasswordOffline();
+        if (await _loginOffline(context, username, password)) return;
 
-        if (storedUser.isNotEmpty &&
-            storedPass.isNotEmpty &&
-            storedUser == username &&
-            storedPass == password) {
-          // Coinciden: flujo offline, rol no permite Lupa
-          List<Map<String, dynamic>> localEmpresas = HiveHelper.getEmpresas();
-          if (localEmpresas.isNotEmpty) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => HomeScreen(
-                  bearerToken: bearerToken,
-                  empresas: localEmpresas,
-                  username: username,
-                  password: password,
-                  puedeEntrarLupa: false,
-                ),
-              ),
-            );
-          } else {
-            _showAlertDialog(
-                context, 'No hay conexión y no hay datos locales disponibles.');
-          }
-        } else {
-          _showAlertDialog(
-              context, 'Credenciales incorrectas en modo offline.');
-        }
+        _showAlertDialog(context, 'Credenciales incorrectas en modo offline.');
         return;
       }
 
@@ -230,8 +202,13 @@ class _LoginScreenState extends State<LoginScreen> {
         final userData = responseData['data']['userData'] ?? {};
         id_usuarios = userData['id_usuarios']?.toString() ?? '';
         await _storeIdUsuariosInBox(id_usuarios);
+        // ---- Guarda credenciales para acceso offline ----
+        await HiveHelper.storeUsernameOffline(username);
+        await HiveHelper.storePasswordOffline(password);
+// -----------------------------------------------
 
         // Nueva lógica de autorización para módulo de LupaEmpresa
+        // ── Guardamos el permiso para uso offline ───────────────
         final String rolInfocontrol =
             userData['rol_infocontrol']?.toString() ?? '';
         final String rol = userData['rol']?.toString() ?? '';
@@ -245,6 +222,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 rol == 'e782765c-26e5-11e8-9f46-708bcd9bba51')) {
           puedeEntrarLupa = true;
         }
+
+        // ── Guardamos el permiso para uso offline ───────────────
+        await HiveHelper.storePuedeEntrarLupa(puedeEntrarLupa);
 
         // Si el checkbox de "Recordar datos" está activo, guardamos las credenciales
         if (_showPendingMessages) {
@@ -281,9 +261,14 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } on DioException catch (_) {
       Navigator.pop(context);
+
+      // ---- Fallback a modo offline ----
+      if (await _loginOffline(context, username, password)) return;
       _showAlertDialog(context, 'Error de conexión en login');
     } catch (_) {
       Navigator.pop(context);
+
+      if (await _loginOffline(context, username, password)) return;
       _showAlertDialog(context, 'Error de conexión en login');
     }
   }
@@ -301,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> sendRequest() async {
     String listarUrl =
-        "https://www.infocontrol.com.ar/desarrollo_v2/api/mobile/empresas/listar";
+        "https://www.infocontrol.tech/web/api/mobile/empresas/listar";
 
     try {
       final response = await dio.get(
@@ -318,6 +303,25 @@ class _LoginScreenState extends State<LoginScreen> {
         final responseData = response.data;
         empresas = List<Map<String, dynamic>>.from(responseData['data']);
         await HiveHelper.insertEmpresas(empresas);
+        // ---------- Guardamos grupos para uso offline ----------
+        final Set<String> gruposUnicos = {};
+        List<Map<String, dynamic>> gruposData = [];
+        for (var emp in empresas) {
+          final gId = (emp['id_grupos'] ?? '').toString();
+          final gNombre = (emp['grupo'] ?? '').toString();
+          if (gId.isNotEmpty &&
+              gNombre.isNotEmpty &&
+              !gruposUnicos.contains(gId)) {
+            gruposUnicos.add(gId);
+            gruposData.add({'id': gId, 'nombre': gNombre});
+          }
+        }
+// ¡importante! casteamos antes de guardar
+        gruposData =
+            gruposData.map((g) => Map<String, dynamic>.from(g)).toList();
+        await HiveHelper.insertGrupos(gruposData);
+// -------------------------------------------------------
+
         setState(() {
           empresaNombre = empresas.isNotEmpty ? empresas[0]['nombre'] : null;
           empresaId =
@@ -332,6 +336,38 @@ class _LoginScreenState extends State<LoginScreen> {
       print('Error inesperado en sendRequest');
     }
   }
+
+  // ---------- LOGIN OFFLINE (reutilizable) ----------
+  Future<bool> _loginOffline(
+      BuildContext context, String username, String password) async {
+    final storedUser = HiveHelper.getUsernameOffline();
+    final storedPass = HiveHelper.getPasswordOffline();
+
+    if (storedUser.isNotEmpty &&
+        storedPass.isNotEmpty &&
+        storedUser == username &&
+        storedPass == password) {
+      // Carga de datos locales
+      final localEmpresas = HiveHelper.getEmpresas();
+      if (localEmpresas.isNotEmpty) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomeScreen(
+              bearerToken: '', // sin token online
+              empresas: localEmpresas,
+              username: username,
+              password: password,
+              puedeEntrarLupa: HiveHelper.getPuedeEntrarLupa(),
+            ),
+          ),
+        );
+        return true; // éxito offline
+      }
+    }
+    return false; // no coincide o no hay datos
+  }
+// ---------------------------------------------------
 
   void _showAlertDialog(BuildContext context, String message) {
     showDialog(
@@ -355,7 +391,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _launchForgotPassword() async {
     final url =
-        'https://www.infocontrol.com.ar/desarrollo_v2/web/usuarios/recuperar_contrasena?lg=arg';
+        'https://www.infocontrol.tech/web/usuarios/recuperar_contrasena?lg=arg';
     await _launchURL(url);
   }
 
